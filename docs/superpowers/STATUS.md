@@ -56,12 +56,33 @@ touch different crates and merge in either order.
 - `ghub-macro` executes a macro at a measured 25 ms cadence and provably
   releases every key it pressed.
 
+## Hardware verification of the macro engine — passed
+
+Measured on the reference G703 on 2026-08-28, with `SuperSpace` bound to the
+rear side button and `Hyper` to the front one:
+
+| Property | Result |
+|---|---|
+| Cadence | 689 injected `SPACE` events across three sustained holds: p50 **25.00 ms**, p99 25.06 ms, max 25.08 ms |
+| Modifier leak | 854 injected `ALT` events under deliberately erratic pressing — the kernel reports **no key held** afterwards |
+| Suppression | `BTN_SIDE` stops reaching the desktop, so the bound button no longer navigates back |
+
+Two things worth knowing for anyone measuring this again, because both cost
+time here:
+
+- **The injector's uinput device is created lazily**, on first injection. A
+  capture script that enumerates devices once at startup will miss it entirely
+  and report zero events. Rescan while capturing.
+- **Counting down/up pairs cannot decide a leak** if the capture window closes
+  mid-run: the final release lands after the window and looks exactly like a
+  stuck key. Ask the kernel instead — `evdev`'s `active_keys()` on the injector
+  device is the authoritative answer.
+
 ## What does not work yet
 
-**No macro can be triggered by a button.** That is the current work: Tasks 3
-and 4 of the macro plan — widening suppression so a bound button stops reaching
-the desktop, and dispatching `Action::RunMacro` from the button runtime. Until
-that lands, `ghub-macro` is a library nothing calls.
+**No per-game profiles and no GUI for any of this.** A macro is configured by
+editing `[macros]` and a binding in `config.toml` by hand; nothing switches on
+the focused window, there is no G-Shift layer, and there is no recorder.
 
 After it: per-game profiles (window matching, the G-Shift layer, the
 level-triggered reconciliation in spec §6) and the GUI (profile list, macro
