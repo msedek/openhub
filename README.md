@@ -1,234 +1,131 @@
-> [!WARNING]
-> **OpenLogi is under active development** and not yet stable — features and config may still change. Give the repo a **Star** ⭐ and **Watch** 👀 it to get notified when a new release lands.
-
-<h4 align="right"><strong>English</strong> | <a href="docs/README.zh-CN.md">简体中文</a> | <a href="docs/README.ja.md">日本語</a> | <a href="docs/README.de.md">Deutsch</a> | <a href="docs/README.fr.md">Français</a> | <a href="docs/README.ko.md">한국어</a></h4>
-
 <p align="center">
-    <img src="https://assets.openlogi.org/brand/openlogi-icon.png" width="138" alt="OpenLogi"/>
+    <img src="design/icon/openlogi-256.png" width="128" alt="OpenHub"/>
 </p>
 
-<h1 align="center">OpenLogi</h1>
-<p align="center"><strong>⚡️ A native, local-first alternative to Logitech Options+, written in Rust 🦀<br/>Unlock the full capabilities of Logitech mice, keyboards, and webcams over HID++ and UVC</strong></p>
+<h1 align="center">OpenHub</h1>
 
-<div align="center">
-    <a href="https://twitter.com/AprilNEA" target="_blank">
-    <img alt="twitter" src="https://img.shields.io/badge/follow-AprilNEA-green?style=social&logo=Twitter"></a>
-    <a href="https://t.me/+VDtkR5OSAT04NzVh" target="_blank">
-    <img alt="telegram" src="https://img.shields.io/badge/chat-telegram-blueviolet?style=flat&logo=Telegram"></a>
-    <a href="https://github.com/AprilNEA/OpenLogi/releases" target="_blank">
-    <img alt="GitHub downloads" src="https://img.shields.io/github/downloads/AprilNEA/OpenLogi/total.svg?style=flat"></a>
-    <a href="https://github.com/AprilNEA/OpenLogi/commits" target="_blank">
-    <img alt="GitHub commit" src="https://img.shields.io/github/commit-activity/m/AprilNEA/OpenLogi?style=flat"></a>
-    <img alt="Hits" src="https://hits.aprilnea.com/hits?url=https://github.com/aprilnea/openlogi">
-</div>
+<p align="center"><strong>A local-first alternative to Logitech G HUB for Linux, written in Rust 🦀<br/>
+Per-game profiles, macros, DPI and lighting for Logitech G gaming mice — no account, no telemetry, plain-TOML config.</strong></p>
 
 <p align="center">
-    <a href="https://trendshift.io/repositories/42303" target="_blank">
-    <img src="https://trendshift.io/api/badge/repositories/42303" alt="AprilNEA%2FOpenLogi | Trendshift" width="250" height="55"/></a>
-    <a href="https://www.producthunt.com/products/openlogi?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-openlogi" target="_blank" rel="noopener noreferrer">
-    <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=openlogi&amp;theme=dark&amp;period=daily">
-        <source media="(prefers-color-scheme: light)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=openlogi&amp;theme=light&amp;period=daily">
-        <img alt="OpenLogi - A local-first alternative to Logitech Options+ | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=openlogi&amp;theme=light&amp;period=daily">
-    </picture></a>
+    <img alt="status" src="https://img.shields.io/badge/status-early%20development-orange?style=flat"/>
+    <img alt="license" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat"/>
+    <img alt="platform" src="https://img.shields.io/badge/platform-Linux-informational?style=flat"/>
 </p>
-
-> **Fed up with Options+? Try OpenLogi.**
-
-Runs on macOS, Linux, and Windows.
 
 ---
 
-## Beyond Options+
+> [!WARNING]
+> **OpenHub is in early development and does not work yet.** The repository
+> currently holds the inherited OpenLogi codebase plus the design for the gaming
+> layer. Nothing described under "What OpenHub adds" is implemented. Watch the
+> repo if you want to know when that changes.
 
-Things OpenLogi does that Options+ won't:
+## Why this exists
 
-- **Stay light.** Native Rust + GPUI.
-- **Run on Linux.** Linux is a first-class platform in OpenLogi.
-- **Gestures on any button.** Give the gesture role to any physical button — or turn gestures off entirely.
-- **Plain-text config.** Everything is one TOML file you can sync between machines however you like.
-- **Script it.** A real CLI alongside the GUI.
+Logitech's G HUB does not run on Linux, and it cannot be made to: it installs a
+kernel-level HID filter driver, which Wine cannot emulate. The tools that do
+exist on Linux stop short of what a gaming mouse actually needs.
 
-## Features
+- **libratbag / Piper** writes to the mouse's onboard memory, but its macros are
+  one-shot. There is no "repeat while the button is held", which is the mode
+  most gaming macros actually use, and no modifier layer.
+- **OpenLogi**, which this project forks, is excellent — but it targets Logitech
+  *Options+* and productivity mice. It discovers remappable buttons through HID++
+  feature `0x1b04`, which gaming mice do not expose. A G703 shows up in OpenLogi
+  with no buttons at all.
 
-- Devices connected over Logi Bolt receivers, Unifying receivers, Bluetooth, or a wired connection, with battery percentage and charge state
-- Button remapping via the OS input hook: a built-in action catalog plus custom keyboard shortcuts authored in the TOML config, including independent short/long-press actions and hold-until-release chords for push-to-talk¹
-- Per-application profile overlays that auto-switch on app focus (macOS + Windows; Linux on X11 / XWayland only)
-- Litra lights: power, brightness, and color temperature, with optional auto power that follows camera activity
+OpenHub picks up where both stop: the HID++ features that gaming hardware
+actually exposes, and a macro engine that behaves like G HUB's.
 
-**Mouse**
+## What OpenHub adds
 
-- Capture and remap the middle, mode-shift, and thumbwheel buttons (middle everywhere, the rest where the device exposes them)
-- Per-direction gesture bindings with live capture, on any capable button
-- Actions Ring: a cursor-centred, eight-slot overlay of actions (`ShowActionsRing`), with per-application layouts
-- DPI control with presets and Cycle / Set-preset actions (`0x2201`)
-- SmartShift wheel: mode toggle, sensitivity, and a permanent-ratchet panel (`0x2111`)
-- Per-device native scroll inversion (`0x2121`, supported devices)
+| | |
+|---|---|
+| **Per-game profiles** | A profile is a first-class object with a name and a game attached. It activates on window focus and, unlike G HUB's, it is level-reconciled: a missed focus reading corrects itself on the next tick instead of leaving you alt-tabbing until the profile catches up. |
+| **Macros that repeat** | The three G HUB modes — no repeat, repeat while held, toggle — with press/release granularity, so `Alt↓ V↕ Alt↑` is expressible. No key is ever left stuck: every exit path emits its releases. |
+| **G-Shift** | Every button carries two assignments. Hold the button bound to G-Shift and the rest switch to their second assignment. |
+| **Gaming HID++** | Feature `0x8100` (onboard profiles), which is where gaming mice keep their buttons, DPI presets, report rate and lighting, and `0x8110` (button spy). |
+| **A model table, not code** | Supporting another mouse is filling in a row: its button slots, evdev codes and HID++ control IDs. |
 
-**Keyboard**
+## What it inherits from OpenLogi
 
-- Global F-key remapping: the same action catalog as the mouse, plus power-user actions — typed text, key combos, multi-step workflows (macOS + Windows)
-- Static RGB lighting (`0x8070` / `0x8080`, supported devices)
+The hard half was already solved, and this fork keeps all of it: the HID++
+protocol stack and receiver handling, device enumeration and pairing, input
+capture and synthesis on Linux, macOS and Windows, the agent↔GUI IPC layer,
+foreground-application detection on Wayland, TOML configuration, and a GPUI
+desktop application that renders each device with clickable button hotspots.
 
-**Camera**
+## Hardware
 
-- Any Logitech UVC webcam (Brio, StreamCam, the C920 series, …), plug and play
-- Live preview that opens the camera only while you watch — leaving it releases the camera entirely and the LED goes off
-- Image controls written straight to the UVC hardware — zoom, focus, exposure, brightness, contrast, saturation, sharpness, white balance, tint, anti-flicker, and low-light compensation, with auto-mode toggles for focus / exposure / white balance — so changes apply in Meet / Zoom / OBS and every other app using the camera
-- One-click profiles: built-in Default / Streaming / Video call plus custom snapshots; settings persist per camera and are written back to the hardware on the next view
+Verified against real hardware:
 
-¹ Media key actions use D-Bus MPRIS on Linux; a handful of macOS-specific actions have no universal Linux equivalent and are no-ops. Windows maps platform actions to native equivalents where available.
+| Device | Transport | Status |
+|---|---|---|
+| Logitech G703 LIGHTSPEED HERO | Lightspeed receiver **and** USB cable | Reference device. HID++ 4.2, 29 features, reads and writes confirmed over wireless. |
 
-## Install
+Every other Logitech device that OpenLogi supports keeps working, since none of
+that code was removed. Gaming-specific features are only implemented for the
+device above so far.
 
-> [!IMPORTANT]
-> Quit **Logi Options+** first: the two applications fight over HID++ access, and only one can own a given receiver at a time.
-
-### macOS
-
-Requires macOS 13 or later.
-
-Download the signed, notarized `.dmg` from the [latest release](https://github.com/AprilNEA/OpenLogi/releases/latest) and drag `OpenLogi.app` to `/Applications`.
-
-Or install via [Homebrew](https://brew.sh):
-
-```sh
-brew install --cask openlogi
-```
-
-The official Homebrew cask is the default installation path. To explicitly
-track the latest GitHub release from `aprilnea/tap` instead:
+## Building
 
 ```sh
-brew tap aprilnea/tap
-brew install --cask aprilnea/tap/openlogi@latest
+# Toolchain: rustup with the pinned stable in rust-toolchain.toml (1.98+)
+sudo apt install -y libudev-dev clang libfontconfig-dev libwayland-dev \
+    libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev pkg-config
+
+cargo build --release
+cargo run -p openlogi-desktop
 ```
 
-`openlogi@latest` is maintained by OpenLogi's release workflow and may update
-before the official cask autobump lands. Install either `openlogi` or
-`openlogi@latest`, not both.
+Development handbook: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Linux installation and udev rules: [docs/INSTALL-linux.md](docs/INSTALL-linux.md).
 
-### Linux
+## Design documents
 
-Download the package for your distribution from the
-[latest release](https://github.com/AprilNEA/OpenLogi/releases/latest):
+- [G HUB clone design](docs/superpowers/specs/2026-08-27-openhub-design.md) — the architecture, the verified hardware findings, and the reasoning behind each decision.
+- [Brand assets design](docs/superpowers/specs/2026-08-27-openhub-brand-assets-design.md) — the visual system and how the assets are generated.
 
-```sh
-# Debian / Ubuntu
-sudo dpkg -i openlogi_*.deb
+## Relationship to OpenLogi
 
-# Fedora / RHEL
-sudo rpm -i openlogi-*.rpm
+OpenHub is a **hard fork** of [OpenLogi](https://github.com/AprilNEA/OpenLogi),
+taken at commit `b32ae087` on 2026-08-27. The complete upstream history is
+preserved here, so every inherited commit keeps its original author.
 
-# Arch Linux
-sudo pacman -U openlogi-*.pkg.tar.zst
-```
+The two projects have different targets — OpenLogi replaces Logitech Options+
+for productivity peripherals, OpenHub replaces G HUB for gaming peripherals —
+and this fork does not intend to merge back. It is an independent project: it is
+not endorsed by or affiliated with OpenLogi, and OpenHub problems should never
+be reported to the OpenLogi tracker.
 
-Packages are published for both `x86_64`/`amd64` and `arm64`/`aarch64`.
-Pre-built packages require GLIBC 2.35 or newer (Ubuntu 22.04 baseline).
+Enormous thanks to [@AprilNEA](https://github.com/AprilNEA) and the OpenLogi
+contributors. Roughly half of this codebase is their work, and it is good work.
 
-NixOS users can instead import the repository's module, which installs the
-package and udev rules and starts the agent with the graphical session:
-
-```nix
-{
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  inputs.openlogi = {
-    url = "github:AprilNEA/OpenLogi";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
-
-  outputs = { nixpkgs, openlogi, ... }: {
-    nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux"; # or aarch64-linux
-      modules = [
-        openlogi.nixosModules.default
-        { programs.openlogi.enable = true; }
-      ];
-    };
-  };
-}
-```
-
-All Linux packages install udev rules that grant your user access to
-`/dev/hidraw*`, `/dev/uinput` and your Logitech mouse's `/dev/input/event*`
-node without `sudo`. The NixOS module starts the agent automatically; after a
-`.deb`, `.rpm`, or `.pkg.tar.zst` installation, enable it for your user:
-
-```sh
-systemctl --user enable --now openlogi-agent.service
-```
-
-See [docs/INSTALL-linux.md](docs/INSTALL-linux.md) for complete NixOS options,
-manual / source installs, and distros without systemd.
-
-### Windows
-
-Signed portable `.zip` archives and per-user `.msi` installers (x86_64 and
-arm64) are attached to each release. Both ship the GUI (`OpenLogi.exe`)
-together with the background agent (`openlogi-agent.exe`), which owns all
-device I/O. Keep the two files side by side when using the portable zip, or
-the GUI has nothing to connect to.
-
-Windows support has been validated end-to-end on Windows 11 with real
-hardware (a wired keyboard and a Unifying-receiver mouse), including
-install, in-place upgrade, and uninstall of the MSI. It is newer than the
-macOS build, so if you hit a rough edge please
-[report it](https://github.com/AprilNEA/OpenLogi/issues). The agent shows a
-system-tray icon (Show Main Window / Quit) so the app stays reachable after
-the main window is closed. To disable it on Windows, set
-`show_in_menu_bar = false` in the TOML `[app_settings]` block and restart the
-agent; the GUI toggle is currently macOS-only.
-
-To build from source, see [DEVELOPMENT.md](docs/DEVELOPMENT.md).
-
-
-## Usage (CLI)
-
-See [USAGE.md](docs/USAGE.md)
-
-## Configuration
-
-See [CONFIGURATION.md](docs/CONFIGURATION.md)
-
-## Developing
-
-See [DEVELOPMENT.md](docs/DEVELOPMENT.md)
-
-## Acknowledgments
-
-- **Windows, cameras, and i18n** by [@davidbudnick](https://github.com/davidbudnick) — keyboard RGB, Windows support, Logitech webcam support
-- **Linux port** by [@cserby](https://github.com/cserby) — Linux support
-- [Solaar](https://github.com/pwr-Solaar/Solaar) by [@pwr](https://github.com/pwr) — open-source HID++ implementation
-- [Mouser](https://github.com/TomBadash/Mouser) by [@TomBadash](https://github.com/TomBadash) — a local, account-free Options+ replacement
+See [NOTICE](NOTICE) for the full attribution.
 
 ## License
 
-The code in this repository is dual-licensed under either of
+Dual-licensed under either of
 
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
 at your option.
 
-### Third-party code
+**Third-party code.** `crates/openlogi-hidpp` is a vendored fork of
+[`hidpp`](https://crates.io/crates/hidpp) by [@lus](https://github.com/lus),
+licensed 0BSD.
 
-`crates/openlogi-hidpp` is a vendored fork of [`hidpp`](https://crates.io/crates/hidpp)
-by [@lus](https://github.com/lus), licensed 0BSD.
-
-### Logo & brand assets
-
-Thanks to [@kubai087](https://github.com/kubai087) for designing the OpenLogi
-logo. The OpenLogi logo and app icon (the brand assets under
-[`design/`](design/)) are © 2026 AprilNEA, all rights reserved, and are not covered by the MIT/Apache
-licenses above; see [`design/LICENSE`](design/LICENSE). Forking the code grants
-no right to the OpenLogi name, logo, or icon; please don't use them to represent
-your own projects, forks, or distributions without prior written permission.
+**Brand assets.** The OpenHub mark and icons under [`design/`](design/) are
+original work, released under the same MIT/Apache terms as the code, and are
+generated from `tools/brand/generate_assets.py`. The OpenLogi brand assets that
+originally occupied that directory are copyright AprilNEA, all rights reserved,
+and their license withholds permission for forks to use them; every one has been
+replaced. See [`design/LICENSE`](design/LICENSE).
 
 ---
 
-**Not affiliated with Logitech.** "Logitech", "MX Master", and "Options+" are trademarks of Logitech International S.A.
-
-## Repo activity
-
-![Repobeats analytics image](https://repobeats.axiom.co/api/embed/4a0b576a03e9d528ad31ccf4797a1286c045d021.svg "Repobeats analytics image")
+**Not affiliated with Logitech.** "Logitech", "G HUB", "Options+", "Lightspeed",
+"HERO" and "MX Master" are trademarks of Logitech International S.A., used here
+only to describe the hardware and software this project interoperates with.
