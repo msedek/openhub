@@ -2660,6 +2660,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghub-models"
+version = "0.8.1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "gif"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

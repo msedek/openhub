@@ -1,0 +1,18 @@
+[package]
+name = "ghub-models"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Hardware model table for OpenHub: button slots, evdev codes and capabilities per gaming device"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
