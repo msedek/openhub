@@ -198,12 +198,15 @@ pub(super) async fn probe_features(
     // for capability derivation instead of discarding it.
     let mut battery_probe = None;
     let mut probe_haptic_controls = false;
+    let mut feature_ids: Vec<u16> = Vec::new();
     let mut capabilities = match device.enumerate_features().await {
         Ok(Some(features)) => {
             let ids: Vec<u16> = features.iter().map(|f| f.id).collect();
             battery_probe = battery_feature_index(ids.iter().copied());
             probe_haptic_controls = ids.contains(&0x19b0) || ids.contains(&0x19c0);
-            Some(Capabilities::from_feature_ids(&ids))
+            let caps = Capabilities::from_feature_ids(&ids);
+            feature_ids = ids;
+            Some(caps)
         }
         Ok(None) => None,
         Err(e) => {
@@ -262,6 +265,16 @@ pub(super) async fn probe_features(
         None => None,
     };
 
+    // A gaming device's buttons live behind `0x8100`, which counts them but
+    // does not name them — the names come from the model table, keyed on the
+    // product ids `0x0003` just reported. So the button capability is only
+    // decidable now, after that read, and is re-derived here rather than in the
+    // feature-table pass above, which could not know them yet.
+    if let Some(caps) = capabilities.as_mut() {
+        caps.buttons =
+            Capabilities::has_buttons(&feature_ids, &reported_product_ids(model_info.as_ref()));
+    }
+
     // `0x0005` reports the device's own marketing type and name. The type is
     // the authoritative kind signal; the marketing name matters especially on
     // Windows Bluetooth, where the OS HID collection is often just `"Mouse"`.
@@ -279,6 +292,24 @@ pub(super) async fn probe_features(
         },
         battery_probe,
     )
+}
+
+/// The product ids a device reported for itself over HID++ `0x0003`, with the
+/// empty slots dropped.
+///
+/// The array is fixed at three entries and a device that uses fewer leaves the
+/// rest zero; `0x0000` is not a product id, and passing it on would let a
+/// future table entry at that key match every device on the bus.
+fn reported_product_ids(model_info: Option<&DeviceModelInfo>) -> Vec<u16> {
+    model_info
+        .map(|info| {
+            info.model_ids
+                .iter()
+                .copied()
+                .filter(|id| *id != 0)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Fill in the capabilities the feature table alone can't answer, each of which

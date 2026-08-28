@@ -16,6 +16,7 @@ openlogi-hid = { path = "../openlogi-hid", version = "0.8.1" }
 openlogi-camera = { path = "../openlogi-camera", version = "0.8.1" }
 openlogi-assets = { path = "../openlogi-assets", version = "0.8.1" }
 openlogi-ipc = { path = "../openlogi-ipc", version = "0.8.1" }
+ghub-models = { workspace = true }
 tarpc = { workspace = true }
 png = "0.17"
 clap = { workspace = true }

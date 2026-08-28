@@ -25,7 +25,7 @@ use openlogi_device::inventory::{Enumerator, InventoryError};
 use openlogi_device::pairing::PairingReceiver;
 use openlogi_device::write::{
     self as device, Dpi, DpiInfo, FeatureEntry, FirmwareEntity, HapticWaveform, LightingMethod,
-    LitraModel, ReprogControlEntry, ScrollResolution, ScrollWheelMode,
+    LitraModel, OnboardState, ReprogControlEntry, ScrollResolution, ScrollWheelMode,
 };
 
 /// This host's HID stack.
@@ -51,6 +51,13 @@ pub async fn get_dpi_info(route: &DeviceRoute) -> Result<DpiInfo, WriteError> {
 /// Write a new sensor DPI to the device `route` reaches.
 pub async fn set_dpi(route: &DeviceRoute, dpi: Dpi) -> Result<(), WriteError> {
     device::set_dpi(&*native_backend(), route, dpi).await
+}
+
+/// Read the HID++ `0x8100` onboard-profile state of the device `route` reaches.
+///
+/// Read-only: nothing here writes to the device's onboard memory.
+pub async fn get_onboard_state(route: &DeviceRoute) -> Result<OnboardState, WriteError> {
+    device::get_onboard_state(&*native_backend(), route).await
 }
 
 /// Read the SmartShift mode, threshold and torque of the device `route` reaches.

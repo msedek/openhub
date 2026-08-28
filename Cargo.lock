@@ -2660,6 +2660,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghub-hidpp-gaming"
+version = "0.8.1"
+
+[[package]]
+name = "ghub-models"
+version = "0.8.1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "gif"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5481,6 +5492,7 @@ version = "0.8.1"
 dependencies = [
  "anyhow",
  "clap",
+ "ghub-models",
  "openlogi-assets",
  "openlogi-camera",
  "openlogi-core",
@@ -5501,6 +5513,7 @@ dependencies = [
  "az",
  "etcetera",
  "fluent-langneg",
+ "ghub-models",
  "num_enum",
  "nutype",
  "openlogi-device-registry",
@@ -5613,6 +5626,7 @@ dependencies = [
  "derive_more",
  "futures",
  "futures-timer",
+ "ghub-hidpp-gaming",
  "hex",
  "hidreport",
  "num_enum",

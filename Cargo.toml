@@ -20,6 +20,8 @@ members = [
     "crates/openlogi-ui",
     "crates/openlogi-overlay",
     "crates/openlogi-hook",
+    "crates/ghub-hidpp-gaming",
+    "crates/ghub-models",
     "xtask",
 ]
 # The CLI used to be the root package, so a bare `cargo build` / `cargo run`
@@ -44,6 +46,8 @@ description = "Lightweight, local-first alternative to Logitech Options+ for HID
 [workspace.dependencies]
 hidpp = { package = "openlogi-hidpp", path = "crates/openlogi-hidpp", version = "0.8.1" }
 openlogi-device-registry = { path = "crates/openlogi-device-registry", version = "0.8.1" }
+ghub-hidpp-gaming = { path = "crates/ghub-hidpp-gaming", version = "0.8.1" }
+ghub-models = { path = "crates/ghub-models", version = "0.8.1" }
 async-hid = { package = "openlogi-async-hid", version = "=0.5.3-openlogi.1" }
 interprocess = { version = "2", features = ["tokio"] }
 # The agent <-> GUI RPC layer itself, over the `interprocess` transport above.

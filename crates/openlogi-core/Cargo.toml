@@ -22,6 +22,7 @@ fs = ["dep:atomic-write-file", "dep:etcetera", "dep:toml_edit"]
 locale = ["dep:fluent-langneg", "dep:rust-i18n", "dep:sys-locale"]
 
 [dependencies]
+ghub-models = { workspace = true }
 openlogi-device-registry = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }

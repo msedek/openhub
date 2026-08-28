@@ -1,0 +1,18 @@
+[package]
+name = "ghub-hidpp-gaming"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "HID++ features that Logitech gaming devices expose: onboard profiles and button spy"
+
+[lints]
+workspace = true
+
+# Deliberately no dependency on `hidpp`. The async `0x8100` feature lives inside
+# `openlogi-hidpp`, next to its siblings, because `FeatureEndpoint` is
+# crate-internal there; that crate therefore depends on this one, and a `hidpp`
+# dependency here would close the loop into a dependency cycle. This crate stays
+# pure decoding: byte slices in, typed values out.
+[dependencies]
