@@ -41,4 +41,8 @@ puts the GUI's clickable hotspots somewhere the button is not.
 76 device entries, 52 of them Logitech, including the `G703 Hero`
 (`usb:046d:c090;usb:046d:4086`) this project develops against.
 
-A device with no entry falls back to `fallback.svg`, a generic mouse outline.
+A device with no entry falls back to `fallback.svg` — which is not a generic
+outline but Piper's placeholder joke: a cartoon mouse holding a "404" sign, with
+`buttonN` elements on its paws. It is a legible "no artwork for this device"
+signal rather than a wrong diagram, but it is not a neutral silhouette, and
+anything that shows it should mean to.

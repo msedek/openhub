@@ -1408,7 +1408,7 @@ mod tests {
                     assignments,
                 }],
             },
-            device_geometry: None,
+            art: None,
             png_width: png.0,
             png_height: png.1,
         }
@@ -1444,7 +1444,7 @@ mod tests {
                     },
                 ],
             },
-            device_geometry: None,
+            art: None,
             png_width: 1872,
             png_height: 728,
         }

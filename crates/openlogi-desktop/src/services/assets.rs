@@ -1,10 +1,11 @@
 //! Device asset resolution and cache management.
 //!
-//! OpenHub product art is generated in-repository and embedded into the binary.
-//! A known model resolves from that local catalog; an unknown model returns
-//! `None` and uses the synthetic silhouette. Legacy filesystem helpers remain
-//! temporarily isolated behind their unit tests while the inherited asset
-//! subsystem is removed in later migration work.
+//! Product art is the vendored Piper drawing set, embedded into the binary and
+//! keyed by USB product id (see [`crate::services::device_art`]). A recognised
+//! model resolves to its own drawing; an unrecognised one returns `None`, and
+//! the mouse model falls back to the generic outline. Legacy filesystem helpers
+//! remain temporarily isolated behind their unit tests while the inherited
+//! asset subsystem is removed in later migration work.
 
 mod glow;
 mod images;
@@ -14,7 +15,6 @@ pub mod sync;
 
 pub(crate) use self::glow::GlowGeometry;
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -23,13 +23,12 @@ use openlogi_assets::{
     BUTTONS_RENDER_FILES, DeviceEntry, FRONT_RENDER_FILES, Index, METADATA_FILES, Metadata,
 };
 use openlogi_core::device::{DeviceKind, DeviceModelInfo};
-use serde::Deserialize;
 use tracing::{debug, warn};
 use walkdir::WalkDir;
 
 use self::images::{buttons_image_for, load_manifest, read_png_dimensions, variant_image_for};
 use self::paths::user_cache_root;
-use crate::app_assets::device_geometry_jsons;
+use crate::services::device_art::{DeviceArt, art_for_products, fallback_art};
 
 /// Total bytes of the per-user asset cache — the tier [`sync`] writes and
 /// [`clear_cache`] removes. The read-only app bundle (release builds) is a
@@ -98,179 +97,6 @@ fn open_in_file_manager(path: &Path) {
     }
 }
 
-/// Canvas dimensions shared by generated vector art, rasters, and markers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-pub struct DeviceCanvas {
-    /// Canonical canvas width.
-    pub width: u16,
-    /// Canonical canvas height.
-    pub height: u16,
-}
-
-/// Physical dimensions recorded with the hardware-verified device definition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-pub struct PhysicalDimensions {
-    /// Front-to-tail length in millimetres.
-    pub length: u32,
-    /// Maximum body width in millimetres.
-    pub width: u32,
-    /// Maximum body height in millimetres.
-    pub height: u32,
-}
-
-/// Hardware identifiers that map a live device to generated art.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct DeviceIdentifiers {
-    /// HID++ model identifiers written as lowercase hexadecimal strings.
-    pub hidpp_model_ids: Vec<String>,
-    /// USB product identifiers written as lowercase hexadecimal strings.
-    pub usb_product_ids: Vec<String>,
-}
-
-/// Identity and dimensions for one generated device.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct LocalDevice {
-    /// Stable directory and catalog identifier.
-    pub id: String,
-    /// Human-facing product name.
-    pub name: String,
-    /// Device family used by gallery presentation.
-    pub kind: String,
-    /// Coordinate system used by every marker.
-    pub canvas: DeviceCanvas,
-    /// Measured physical size.
-    pub physical_dimensions_mm: PhysicalDimensions,
-    /// Stable protocol and transport identities.
-    pub identifiers: DeviceIdentifiers,
-}
-
-/// Logical control currently understood by the inherited binding UI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DeviceControl {
-    /// Primary left click.
-    LeftClick,
-    /// Primary right click.
-    RightClick,
-    /// Scroll-wheel press.
-    MiddleClick,
-    /// Rear navigation side button.
-    Back,
-    /// Front navigation side button.
-    Forward,
-    /// DPI or mode-shift button.
-    DpiToggle,
-}
-
-/// Label gutter selected by the device author.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DeviceLabelSide {
-    /// Label appears to the left of the illustration.
-    Left,
-    /// Label appears to the right of the illustration.
-    Right,
-}
-
-/// One marker point in canonical canvas units.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
-pub struct DevicePoint {
-    /// Horizontal canvas coordinate.
-    pub x: f32,
-    /// Vertical canvas coordinate.
-    pub y: f32,
-}
-
-/// Verified evdev identity for a physical control.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct DeviceEvdevCode {
-    /// Linux input-event symbolic name.
-    pub name: String,
-    /// Linux input-event numeric code.
-    pub code: u16,
-}
-
-/// One physical, selectable device slot.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct DeviceSlot {
-    /// Hardware-facing slot id such as `g4`.
-    pub id: String,
-    /// Temporary bridge to the inherited `ButtonId` UI.
-    pub control: DeviceControl,
-    /// Human description of the physical location.
-    pub physical_location: String,
-    /// Verified Linux event identity.
-    pub evdev: DeviceEvdevCode,
-    /// Click marker in canonical canvas coordinates.
-    pub marker: DevicePoint,
-    /// Preferred label gutter.
-    pub label_side: DeviceLabelSide,
-}
-
-/// One independently tintable physical lighting zone.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct DeviceLightingZone {
-    /// Stable zone id used by future lighting configuration.
-    pub id: String,
-    /// Element id in the generated SVG.
-    pub svg_element: String,
-    /// Raster height to generated alpha-mask filename.
-    pub masks: BTreeMap<String, String>,
-}
-
-/// Versioned geometry document embedded beside generated device art.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct DeviceGeometry {
-    /// Schema discriminator; currently exactly `1`.
-    pub schema_version: u32,
-    /// Model identity and coordinate system.
-    pub device: LocalDevice,
-    /// Physical buttons in stable G-number order.
-    pub slots: Vec<DeviceSlot>,
-    /// Real, independently tintable lighting regions.
-    pub lighting_zones: Vec<DeviceLightingZone>,
-}
-
-impl DeviceGeometry {
-    fn is_valid(&self) -> bool {
-        let dimensions = self.device.physical_dimensions_mm;
-        self.schema_version == 1
-            && DeviceKind::from_registry_type(&self.device.kind).is_some()
-            && self.device.canvas.width > 0
-            && self.device.canvas.height > 0
-            && dimensions.length > 0
-            && dimensions.width > 0
-            && dimensions.height > 0
-            && !self.device.identifiers.hidpp_model_ids.is_empty()
-            && !self.device.identifiers.usb_product_ids.is_empty()
-            && !self.slots.is_empty()
-            && self.slots.iter().all(|slot| {
-                !slot.id.is_empty()
-                    && !slot.physical_location.is_empty()
-                    && !slot.evdev.name.is_empty()
-                    && slot.marker.x >= 0.0
-                    && slot.marker.x <= f32::from(self.device.canvas.width)
-                    && slot.marker.y >= 0.0
-                    && slot.marker.y <= f32::from(self.device.canvas.height)
-            })
-            && self.lighting_zones.iter().all(|zone| {
-                !zone.id.is_empty()
-                    && !zone.svg_element.is_empty()
-                    && zone.masks.contains_key("120")
-                    && zone.masks.contains_key("320")
-            })
-    }
-
-    fn matches(&self, model: &DeviceModelInfo) -> bool {
-        self.device
-            .identifiers
-            .hidpp_model_ids
-            .iter()
-            .filter_map(|id| u16::from_str_radix(id, 16).ok())
-            .any(|id| model.model_ids.contains(&id))
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedAsset {
     pub depot: String,
@@ -296,8 +122,9 @@ pub struct ResolvedAsset {
     /// (see [`crate::app::glow_canvas`]). `None` for depots without a mask.
     pub glow: Option<Arc<GlowGeometry>>,
     pub metadata: Metadata,
-    /// OpenHub-authored absolute marker and lighting geometry.
-    pub device_geometry: Option<DeviceGeometry>,
+    /// The device drawing this model resolved to, with the button and lit-zone
+    /// rectangles measured out of it at build time.
+    pub art: Option<&'static DeviceArt>,
     /// Actual pixel dimensions of `image_path`. Logi's
     /// `core_metadata.json` `origin` field tracks the *bbox of the mouse
     /// silhouette inside* the PNG — the PNG ships with extra transparent
@@ -520,7 +347,7 @@ impl AssetResolver {
                 hero_image_resource: None,
                 glow,
                 metadata,
-                device_geometry: None,
+                art: None,
                 png_width,
                 png_height,
             });
@@ -575,7 +402,7 @@ impl AssetResolver {
                 // verified front image; shared metadata remains for HID++
                 // button hotspots in `load_files`.
                 metadata: Metadata::default(),
-                device_geometry: None,
+                art: None,
                 png_width,
                 png_height,
             });
@@ -585,32 +412,67 @@ impl AssetResolver {
     }
 }
 
+/// The drawing for a HID++ device, matched on the product ids it reports.
+///
+/// A device names itself with one product id per transport it supports — the
+/// wired USB id, the eQuad id it answers to through a receiver, a Bluetooth id
+/// — and Piper's registry may have recorded any one of them, so all three
+/// slots are offered and the first that matches wins.
 fn resolve_local_asset(model: &DeviceModelInfo) -> Option<ResolvedAsset> {
-    device_geometry_jsons().iter().find_map(|json| {
-        let geometry: DeviceGeometry = serde_json::from_str(json).ok()?;
-        if !geometry.is_valid() || !geometry.matches(model) {
-            return None;
-        }
-        let device_id = &geometry.device.id;
-        let canvas = geometry.device.canvas;
-        let png_height = 320_u32;
-        let png_width = (u32::from(canvas.width) * png_height + u32::from(canvas.height) / 2)
-            / u32::from(canvas.height);
-        Some(ResolvedAsset {
-            depot: device_id.clone(),
-            display_name: geometry.device.name.clone(),
-            kind: DeviceKind::from_registry_type(&geometry.device.kind),
-            image_path: PathBuf::new(),
-            image_resource: Some(format!("device-assets/{device_id}/device-{png_height}.png")),
-            hero_image_path: None,
-            hero_image_resource: Some(format!("device-assets/{device_id}/device-120.png")),
-            glow: None,
-            metadata: Metadata::default(),
-            device_geometry: Some(geometry),
-            png_width,
-            png_height,
-        })
-    })
+    let (entry, art) = art_for_products(model.model_ids)?;
+    Some(resolved_art(art, entry.name.to_owned()))
+}
+
+/// Wrap a drawing as the [`ResolvedAsset`] the device panels consume.
+///
+/// `kind` is deliberately left unset: the vendored registry records a drawing
+/// and the ids that select it, not a device class, so the runtime HID++
+/// classification stays authoritative.
+fn resolved_art(art: &'static DeviceArt, display_name: String) -> ResolvedAsset {
+    ResolvedAsset {
+        depot: art
+            .resource
+            .rsplit('/')
+            .next()
+            .unwrap_or(art.resource)
+            .to_owned(),
+        display_name,
+        kind: None,
+        image_path: PathBuf::new(),
+        image_resource: Some(art.resource.to_owned()),
+        hero_image_path: None,
+        hero_image_resource: Some(art.resource.to_owned()),
+        glow: None,
+        metadata: Metadata::default(),
+        art: Some(art),
+        png_width: canvas_pixels(art.canvas.width),
+        png_height: canvas_pixels(art.canvas.height),
+    }
+}
+
+/// Piper's `fallback.svg`, as a resolved asset — used by the mouse model for a
+/// device the registry does not list, so the panel still shows something with
+/// hotspots instead of an empty frame.
+///
+/// Be aware of what that drawing is: not a generic mouse outline but a cartoon
+/// mouse holding a "404" sign, Piper's deliberate "no artwork for your device"
+/// placeholder. Its `buttonN` elements are on the animal's paws. It reads as a
+/// clear signal rather than a wrong diagram, but it is a taste call — swapping
+/// this call for the synthetic silhouette is the whole of the alternative.
+#[must_use]
+pub fn fallback_asset() -> ResolvedAsset {
+    resolved_art(fallback_art(), String::new())
+}
+
+/// A drawing's canvas dimension as whole pixels, for the consumers that still
+/// reason in raster sizes.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a cropped drawing canvas is a few hundred SVG units — positive, and far below u32::MAX"
+)]
+fn canvas_pixels(value: f32) -> u32 {
+    value.round().max(1.0) as u32
 }
 
 impl Default for AssetResolver {
@@ -799,23 +661,37 @@ mod tests {
             .resolve(&g703_model(), Some("G703 LIGHTSPEED HERO"))
             .expect("G703 should resolve without a filesystem or network asset source");
 
-        assert_eq!(asset.depot, "g703_hero");
+        assert_eq!(asset.display_name, "Logitech G703 Hero");
         assert_eq!(
             asset.image_resource.as_deref(),
-            Some("device-assets/g703_hero/device-320.png")
+            Some("device-art/logitech-g703.svg")
         );
         assert_eq!(
             asset.hero_image_resource.as_deref(),
-            Some("device-assets/g703_hero/device-120.png")
+            asset.image_resource.as_deref(),
+            "one drawing serves both the model panel and the gallery card"
         );
-        let geometry = asset
-            .device_geometry
-            .expect("embedded G703 art must carry local geometry");
+        let art = asset.art.expect("the G703 resolves to a vendored drawing");
+        assert_eq!(art.buttons.len(), 6);
+        assert_eq!(art.leds.len(), 2);
         assert_eq!(
-            (geometry.device.canvas.width, geometry.device.canvas.height),
-            (320, 560)
+            (asset.png_width, asset.png_height),
+            (
+                canvas_pixels(art.canvas.width),
+                canvas_pixels(art.canvas.height)
+            ),
+            "raster consumers see the drawing's own canvas"
         );
-        assert_eq!(geometry.slots.len(), 6);
+    }
+
+    /// The generic outline is a real, hotspot-bearing asset — the mouse model
+    /// leans on it for every device the registry does not list.
+    #[test]
+    fn the_fallback_asset_carries_art() {
+        let asset = fallback_asset();
+        let art = asset.art.expect("the fallback is a drawing like any other");
+        assert!(!art.buttons.is_empty());
+        assert_eq!(asset.image_resource.as_deref(), Some(art.resource));
     }
 
     #[test]
