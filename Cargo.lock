@@ -2660,6 +2660,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghub-hidpp-gaming"
+version = "0.8.1"
+
+[[package]]
 name = "ghub-models"
 version = "0.8.1"
 dependencies = [

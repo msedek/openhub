@@ -20,6 +20,7 @@ members = [
     "crates/openlogi-ui",
     "crates/openlogi-overlay",
     "crates/openlogi-hook",
+    "crates/ghub-hidpp-gaming",
     "crates/ghub-models",
     "xtask",
 ]
