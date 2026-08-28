@@ -397,7 +397,7 @@ side buttons is which — a question a prior note had left open."
   - `ghub_hidpp_gaming::onboard_profiles::DeviceMode { Onboard, Host }` with `DeviceMode::from_wire(u8) -> Option<DeviceMode>` and `DeviceMode::to_wire(self) -> u8`
   - `ghub_hidpp_gaming::onboard_profiles::ParseError` (an error enum implementing `std::error::Error`)
 
-`getOnboardProfilesInfo` is function 0 of feature `0x8100`. Its response is ten bytes, in this order: memory model id, profile format id, macro format id, profile count, profile count out-of-box, button count, sector count, sector size (two bytes, big endian), mechanical layout, various info. Device mode is function 2 and returns one byte: `0x01` means the device runs from its own memory, `0x02` means the host drives it.
+`getOnboardProfilesInfo` is function 0 of feature `0x8100`. Its response is **eleven** bytes — ten fields, of which `sector_size` takes two — in this order: memory model id, profile format id, macro format id, profile count, profile count out-of-box, button count, sector count, sector size (two bytes, big endian), mechanical layout, various info. Device mode is function 2 and returns one byte: `0x01` means the device runs from its own memory, `0x02` means the host drives it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -493,7 +493,10 @@ description = "HID++ features that Logitech gaming devices expose: onboard profi
 workspace = true
 
 [dependencies]
-hidpp = { workspace = true }
+# Deliberately empty. This crate must NOT depend on `hidpp`: Task 3 makes
+# `openlogi-hidpp` depend on this crate, so a dependency the other way would
+# close a cycle and cargo would reject the workspace. Nothing here needs it —
+# these are pure byte parsers.
 ```
 
 Add `"crates/ghub-hidpp-gaming",` to the workspace `members`.
@@ -686,6 +689,21 @@ without hardware. The async wrapper follows."
 ---
 
 ## Task 3: The async `0x8100` feature
+
+> **Corrections carried forward from Task 2, which is already done.** Task 2's
+> agent found two errors in this plan and verified the fix against libratbag's
+> `src/hidpp20.h` rather than guessing:
+>
+> 1. The info payload is **eleven** bytes, not ten — `sector_size` is two of
+>    them. `INFO_LEN` is 11 in the merged code.
+> 2. **`ghub-hidpp-gaming` must never depend on `hidpp`.** This task makes
+>    `openlogi-hidpp` depend on `ghub-hidpp-gaming`; a dependency the other way
+>    is a cycle and cargo rejects the workspace. Do not add it back.
+>
+> The same source confirms this task's constants: functions 0–4 sit at
+> addresses `0x00`, `0x10`, `0x20`, `0x30`, `0x40`, and the device modes are
+> `0x01` onboard, `0x02` host.
+
 
 **Files:**
 - Create: `crates/openlogi-hidpp/src/feature/onboard_profiles.rs`
