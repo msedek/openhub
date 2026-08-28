@@ -219,7 +219,52 @@ fn long_press_never_passes_through_as_a_native_click() {
         default_binding(ButtonId::Back),
         Action::MissionControl,
     ));
-    assert!(!binding_is_native_click(ButtonId::Back, &binding));
+    assert!(!binding_passes_through(ButtonId::Back, &binding));
+}
+
+/// The floor from `ButtonId::may_suppress`, seen from the gate that enforces
+/// it: the hook decodes the primary click like any other button, but only
+/// swallows it once the user put something in its place. A profile that
+/// silenced it with `Action::None` would leave the desktop unclickable and no
+/// way to reach the GUI that would undo the profile.
+#[test]
+fn the_primary_click_is_only_swallowed_when_something_is_bound_to_it() {
+    assert!(binding_passes_through(
+        ButtonId::LeftClick,
+        &Binding::Single(Action::LeftClick)
+    ));
+    assert!(binding_passes_through(
+        ButtonId::LeftClick,
+        &Binding::Single(Action::None)
+    ));
+    assert!(!binding_passes_through(
+        ButtonId::LeftClick,
+        &Binding::Single(Action::Copy)
+    ));
+}
+
+/// Every other button the hook decodes is swallowed as soon as it carries a
+/// binding that is not its own native click — the gap this widening closes.
+/// Before it, the button behind the wheel could not host a remap and the
+/// secondary button could not become an auto-clicker.
+#[test]
+fn any_other_bound_button_is_swallowed() {
+    for id in [
+        ButtonId::RightClick,
+        ButtonId::MiddleClick,
+        ButtonId::Back,
+        ButtonId::Forward,
+        ButtonId::DpiToggle,
+    ] {
+        assert!(
+            !binding_passes_through(id, &Binding::Single(Action::None)),
+            "{id} passed through a deliberate Action::None"
+        );
+        assert!(
+            !binding_passes_through(id, &Binding::Single(Action::Copy)),
+            "{id} passed through a bound action"
+        );
+    }
 }
 
 #[test]
