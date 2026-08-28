@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="560" viewBox="0 0 320 560" role="img" aria-labelledby="title desc">
+  <title id="title">Logitech G703 LIGHTSPEED HERO</title>
+  <desc id="desc">Original OpenHub top-down technical illustration.</desc>
+  <g id="device-art">
+    <path id="device-body" d="M 160 18 C 132 17 109 29 94 55 C 72 91 56 153 47 224 C 36 300 20 365 17 426 C 14 478 49 516 110 538 C 128 544 145 546 160 546 C 179 546 198 541 216 534 C 270 513 301 478 303 433 C 306 367 296 300 285 228 C 275 155 259 92 232 54 C 214 28 190 17 160 18 Z" fill="#0D1828" stroke="#7390A6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="palm-shell" d="M 64 223 C 91 215 126 212 159 214 C 205 210 246 218 285 238 C 294 302 301 370 298 427 C 294 470 264 504 212 526 C 177 540 143 541 109 530 C 52 511 23 477 25 429 C 28 365 44 291 64 223 Z" fill="#12233A" stroke="#35506A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="button-g1" d="M 157 26 C 130 25 108 36 94 61 C 75 94 66 143 63 195 C 89 204 122 207 154 202 C 156 143 157 84 157 26 Z" fill="#19304B" stroke="#4D6A82" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="button-g2" d="M 163 26 C 190 24 214 35 230 61 C 251 96 262 144 268 198 C 239 206 202 208 166 202 C 164 142 163 84 163 26 Z" fill="#172B44" stroke="#4D6A82" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline id="center-seam" points="160,24 160,219" fill="none" stroke="#6A879D" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity="0.78"/>
+    <rect id="wheel-well" x="139" y="62" width="42" height="115" rx="20" fill="#08111F" stroke="#45657D" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect id="button-g3" x="146" y="70" width="28" height="98" rx="13" fill="#243A50" stroke="#87A2B5" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline id="wheel-tread-1" points="150,87 170,87" fill="none" stroke="#7390A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+    <polyline id="wheel-tread-2" points="149,104 171,104" fill="none" stroke="#7390A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+    <polyline id="wheel-tread-3" points="149,121 171,121" fill="none" stroke="#7390A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+    <polyline id="wheel-tread-4" points="149,138 171,138" fill="none" stroke="#7390A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+    <polyline id="wheel-tread-5" points="150,155 170,155" fill="none" stroke="#7390A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+    <rect id="button-g6" x="142" y="187" width="36" height="33" rx="12" fill="#203851" stroke="#66849A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline id="g6-index" points="151,203 169,203" fill="none" stroke="#22D3C5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.72"/>
+    <rect id="button-g5" x="28" y="190" width="54" height="46" rx="14" fill="#1C3149" stroke="#66849A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect id="button-g4" x="31" y="252" width="55" height="50" rx="15" fill="#1A2E45" stroke="#66849A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline id="left-flank-seam" points="41,317 27,404 30,450" fill="none" stroke="#45657D" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.65"/>
+    <polyline id="right-technical-contour" points="278,255 290,358 286,435" fill="none" stroke="#45657D" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.58"/>
+    <polyline id="tail-axis" points="160,243 160,498" fill="none" stroke="#35506A" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.35"/>
+  </g>
+  <g id="lighting-logo" data-lighting-zone="logo">
+    <polyline id="logo-bridge-left" points="160,402 144,389" fill="none" stroke="#22D3C5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline id="logo-bridge-right" points="160,402 177,389" fill="none" stroke="#22D3C5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline id="logo-bridge-top" points="160,402 160,379" fill="none" stroke="#22D3C5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline id="logo-bridge-tail" points="160,402 160,427" fill="none" stroke="#22D3C5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <ellipse id="logo-hub" cx="160" cy="402" rx="9" ry="9" fill="#22D3C5"/>
+    <ellipse id="logo-node-left" cx="144" cy="389" rx="6" ry="6" fill="#2563EB"/>
+    <ellipse id="logo-node-right" cx="177" cy="389" rx="6" ry="6" fill="#22D3C5"/>
+    <rect id="logo-node-top" x="155" y="369" width="10" height="19" rx="5" fill="#2563EB"/>
+    <ellipse id="logo-node-tail" cx="160" cy="427" rx="6" ry="6" fill="#22D3C5"/>
+  </g>
+  <g id="lighting-dpi_indicator" data-lighting-zone="dpi_indicator">
+    <rect id="dpi-track" x="37" y="326" width="12" height="75" rx="6" fill="#153C5C" stroke="#456D85" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect id="dpi-lit-1" x="40" y="331" width="6" height="19" rx="3" fill="#2563EB"/>
+    <rect id="dpi-lit-2" x="40" y="355" width="6" height="19" rx="3" fill="#22D3C5"/>
+    <rect id="dpi-lit-3" x="40" y="379" width="6" height="17" rx="3" fill="#22D3C5" opacity="0.72"/>
+  </g>
+</svg>
