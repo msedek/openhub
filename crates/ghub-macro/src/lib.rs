@@ -10,9 +10,12 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "exec")]
 mod executor;
 mod model;
+#[cfg(feature = "exec")]
 mod timer;
 
+#[cfg(feature = "exec")]
 pub use executor::{Executor, RunHandle, Sink};
 pub use model::{Macro, MacroId, RepeatMode, Step};

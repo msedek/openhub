@@ -5432,6 +5432,7 @@ name = "openlogi-agent-core"
 version = "0.8.1"
 dependencies = [
  "futures-lite",
+ "ghub-macro",
  "openlogi-core",
  "openlogi-hid",
  "openlogi-hook",
@@ -5521,6 +5522,7 @@ dependencies = [
  "az",
  "etcetera",
  "fluent-langneg",
+ "ghub-macro",
  "ghub-models",
  "num_enum",
  "nutype",

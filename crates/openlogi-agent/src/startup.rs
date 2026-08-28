@@ -135,6 +135,7 @@ impl InputServices {
             shared.channel_registry.clone(),
             shared.receiver_access.clone(),
             sender,
+            shared.macros.clone(),
         ) {
             Ok(runtime) => runtime,
             Err(e) => {

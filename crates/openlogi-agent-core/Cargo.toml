@@ -11,6 +11,7 @@ description = "Headless orchestration shared by the OpenLogi background agent: h
 publish = false
 
 [dependencies]
+ghub-macro = { workspace = true, features = ["exec"] }
 openlogi-core = { path = "../openlogi-core" }
 openlogi-inject = { path = "../openlogi-inject" }
 openlogi-hid = { path = "../openlogi-hid" }

@@ -10,6 +10,14 @@ description = "Macro model and execution engine for OpenHub: G HUB's repeat mode
 [lints]
 workspace = true
 
+[features]
+default = ["exec"]
+# The run loop and its pacing. Split from the model because `openlogi-core`
+# needs only the data — a `MacroId` in a binding and a macro table in the
+# config — and is checked against `wasm32-unknown-unknown`, which has no
+# threads to run a macro on.
+exec = []
+
 [dependencies]
 serde = { workspace = true }
 

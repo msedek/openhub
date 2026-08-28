@@ -1,5 +1,6 @@
 //! The action vocabulary a button can bind to, plus workflow steps.
 
+use ghub_macro::MacroId;
 use serde::{Deserialize, Serialize};
 
 use super::application_target::ApplicationTarget;
@@ -187,6 +188,21 @@ pub enum Action {
     /// cancellation and shutdown. Dispatchers without a release context must
     /// degrade this action to a balanced tap rather than leave keys held.
     HoldShortcut(KeyCombo),
+    /// Run a configured macro — a sequence of press/release steps plus one of
+    /// G HUB's repeat modes, looked up by id in the config's macro table.
+    ///
+    /// The payload is the id rather than the macro itself so renaming or
+    /// re-recording a macro never invalidates the bindings that reference it.
+    /// That also means [`Action::label`] can only name the id: the human name
+    /// lives in the table, which this crate's action vocabulary cannot reach.
+    ///
+    /// The agent owns execution (see [`Effect::AgentSide`]) because a run
+    /// outlives the single call an injector makes: it repeats until the press
+    /// that started it ends, and every terminal path must release what it
+    /// pressed. A dispatcher with no release context degrades this to one pass.
+    ///
+    /// [`Effect::AgentSide`]: crate::binding::Effect::AgentSide
+    RunMacro(MacroId),
 }
 
 /// One step in a [`Action::Workflow`]. A workflow is a `Vec<WorkflowStep>`
@@ -313,6 +329,7 @@ macro_rules! derive_action_core {
                     Action::Workflow(steps) => format!("Workflow ({} steps)", steps.len()),
                     Action::OpenApplication(target) => format!("Open {}", target.display_name()),
                     Action::HoldShortcut(combo) => format!("Hold {}", combo.rendered_label()),
+                    Action::RunMacro(id) => format!("Run macro \"{}\"", id.0),
                 }
             }
 
@@ -328,7 +345,8 @@ macro_rules! derive_action_core {
                     | Action::RunAppleScript(_)
                     | Action::RunShellCommand(_)
                     | Action::Workflow(_)
-                    | Action::HoldShortcut(_) => Category::Editing,
+                    | Action::HoldShortcut(_)
+                    | Action::RunMacro(_) => Category::Editing,
                     Action::SetDpiPreset(_) => Category::Dpi,
                     Action::OpenApplication(_) => Category::System,
                 }

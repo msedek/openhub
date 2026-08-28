@@ -7,6 +7,7 @@
 
 mod button;
 pub mod hook;
+pub mod macros;
 pub mod scroll;
 
 use std::collections::HashMap;
@@ -19,9 +20,10 @@ use openlogi_hid::{CaptureChannel, ChannelRegistry};
 use tracing::{info, warn};
 
 use self::button::{
-    ButtonInputHandle, ButtonRuntimeEvent, ButtonRuntimeOwner, EndReason, PressControl,
+    ActivePress, ButtonInputHandle, ButtonRuntimeEvent, ButtonRuntimeOwner, EndReason, PressControl,
 };
 pub(crate) use self::button::{HidppSessionId, PressToken};
+use self::macros::{MacroRunner, SharedMacros};
 use crate::hardware::{toggle_smartshift_in_background, write_dpi_in_background};
 use crate::receiver_access::ReceiverAccess;
 use crate::{DpiCycleState, DpiCycles};
@@ -71,10 +73,19 @@ struct ActionExecutor {
     registry: ChannelRegistry,
     receiver_access: ReceiverAccess,
     action_ring: tokio::sync::mpsc::UnboundedSender<Option<String>>,
+    macros: MacroRunner,
 }
 
 impl ActionExecutor {
     fn dispatch(&self, action: &Action, device_key: Option<&str>) {
+        // A dispatch with no press behind it owns no release, so a repeating
+        // macro started here would never be told to stop. The press-owned path
+        // in `ButtonEventHandler::start_action` takes RunMacro before it can
+        // reach this; what is left are the sources that fire and forget.
+        if let Action::RunMacro(id) = action {
+            self.macros.run_once(id);
+            return;
+        }
         if matches!(action, Action::ShowActionsRing) {
             if self
                 .action_ring
@@ -172,16 +183,21 @@ impl ButtonEventHandler {
         match event {
             ButtonRuntimeEvent::Started(press) => {
                 if let Some(action) = press.start_action() {
-                    self.start_action(press.token(), action, press.device_key());
+                    self.start_action(&press, action);
                 }
             }
             ButtonRuntimeEvent::Triggered { press, action } => {
-                self.start_action(press.token(), &action, press.device_key());
+                self.start_action(&press, &action);
             }
             ButtonRuntimeEvent::Ended { press, reason } => {
                 if let Some(combo) = self.held.end(press.token()) {
                     openlogi_inject::release_hold(&combo);
                 }
+                // Every terminal outcome arrives here — release, a lost
+                // release, a dead source, an invalidated generation, shutdown —
+                // so a macro run owned by this press has exactly one place to
+                // be stopped, and no reason needs a path of its own.
+                self.executor.macros.end_press(press.token());
                 if let EndReason::Canceled(reason) = reason {
                     match press.control() {
                         PressControl::Button(button) => {
@@ -196,8 +212,19 @@ impl ButtonEventHandler {
         }
     }
 
-    fn start_action(&mut self, press: &PressToken, action: &Action, device_key: Option<&str>) {
-        match self.held.start(press, action) {
+    fn start_action(&mut self, press: &ActivePress, action: &Action) {
+        // A macro run is neither instantaneous nor a held chord: it repeats
+        // for as long as the press lives and has to release what it pressed
+        // when the press ends, so it hangs off the same terminal event
+        // `HoldShortcut` does rather than off a parallel lifecycle.
+        if let Action::RunMacro(id) = action {
+            self.executor
+                .macros
+                .start(press.token(), press.control(), press.device_key(), id);
+            return;
+        }
+        let device_key = press.device_key();
+        match self.held.start(press.token(), action) {
             HoldStart::NotHeld => self.executor.dispatch(action, device_key),
             HoldStart::Started(combo) => openlogi_inject::press_hold(&combo),
             HoldStart::Replaced { old, new } => {
@@ -232,6 +259,7 @@ impl ActionRuntime {
         registry: ChannelRegistry,
         receiver_access: ReceiverAccess,
         action_ring: tokio::sync::mpsc::UnboundedSender<Option<String>>,
+        macros: SharedMacros,
     ) -> io::Result<Self> {
         let executor = ActionExecutor {
             dpi_cycle,
@@ -239,6 +267,7 @@ impl ActionRuntime {
             registry,
             receiver_access,
             action_ring,
+            macros: MacroRunner::new(macros),
         };
         let mut button_handler = ButtonEventHandler::new(executor.clone());
         let buttons = ButtonRuntimeOwner::spawn(move |event| button_handler.handle(event))?;
@@ -261,6 +290,10 @@ impl ActionRuntime {
     /// Reject new button input, emit terminal cancellation, and join the worker.
     pub fn shutdown(&mut self) {
         let _ = self.buttons.shutdown();
+        // The worker's cancellation already stopped every run an active press
+        // owned. This catches what no press owns any more: a latched toggle,
+        // which by design outlives the press that started it.
+        self.dispatcher.executor.macros.stop_all();
     }
 }
 
@@ -311,6 +344,7 @@ impl ActionDispatcher {
     /// [`openlogi_hook::MouseEvent::CaptureInterrupted`].
     pub(crate) fn cancel_hook_thread_buttons(&self) {
         self.buttons.cancel_hook_thread();
+        self.executor.macros.stop_source(None);
     }
 
     /// Queue one HID++ down edge for a specific capture session.
@@ -342,6 +376,10 @@ impl ActionDispatcher {
     /// Cancel presses from a HID++ session that is stopping or has died.
     pub(crate) fn cancel_hidpp_session(&self, session: &HidppSessionId) {
         self.buttons.cancel_hidpp_session(session);
+        // A latched toggle belongs to no live press, so the worker's
+        // cancellation cannot reach it — and the control that would un-latch
+        // it just went away with the device.
+        self.executor.macros.stop_source(Some(session.device_key()));
     }
 
     /// Invalidate every active lifecycle after a binding/profile change or
@@ -349,12 +387,17 @@ impl ActionDispatcher {
     /// generation are ignored even if they arrive after this call's wake-up.
     pub fn cancel_all_buttons(&self) {
         self.buttons.invalidate_all();
+        // Also the terminal edge for a profile change and a foreground switch.
+        // Nothing that survives one still has a binding that explains it, and
+        // a latched toggle has no press left for the invalidation to cancel.
+        self.executor.macros.stop_all();
     }
 
     /// Cancel only presses owned by an OS-hook callback. HID++ capture does not
     /// depend on Accessibility and remains active when the native hook stops.
     pub fn cancel_hook_buttons(&self) {
         self.buttons.cancel_hooks();
+        self.executor.macros.stop_source(None);
     }
 }
 

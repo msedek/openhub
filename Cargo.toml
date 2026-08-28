@@ -49,7 +49,11 @@ hidpp = { package = "openlogi-hidpp", path = "crates/openlogi-hidpp", version = 
 openlogi-device-registry = { path = "crates/openlogi-device-registry", version = "0.8.1" }
 ghub-hidpp-gaming = { path = "crates/ghub-hidpp-gaming", version = "0.8.1" }
 ghub-models = { path = "crates/ghub-models", version = "0.8.1" }
-ghub-macro = { path = "crates/ghub-macro", version = "0.8.1" }
+# Model only by default. `openlogi-core` carries the macro types into the
+# config and the action vocabulary and is checked against
+# `wasm32-unknown-unknown`; only the agent needs the run loop, and it asks
+# for it with `features = ["exec"]`.
+ghub-macro = { path = "crates/ghub-macro", version = "0.8.1", default-features = false }
 async-hid = { package = "openlogi-async-hid", version = "=0.5.3-openlogi.1" }
 interprocess = { version = "2", features = ["tokio"] }
 # The agent <-> GUI RPC layer itself, over the `interprocess` transport above.

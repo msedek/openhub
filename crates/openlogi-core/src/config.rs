@@ -8,6 +8,7 @@
 
 use std::{collections::BTreeMap, path::Path};
 
+use ghub_macro::{Macro, MacroId};
 use serde::{Deserialize, Serialize};
 
 mod device;
@@ -128,6 +129,21 @@ pub struct Config {
     /// `[keyboard]` section loading unchanged.
     #[serde(default)]
     pub keyboard: KeyboardConfig,
+    /// Recorded macros, keyed by the id an [`Action::RunMacro`] binding stores.
+    ///
+    /// Document-scoped rather than per-device on purpose: a binding is
+    /// dispatched from two capture paths, and the OS-hook path carries no
+    /// device key at all (a `CGEventTap` / evdev event is not attributed to a
+    /// HID++ route), so a per-device table would be unreachable from exactly
+    /// the path a gaming mouse's buttons arrive on. One table also means the
+    /// same macro can be bound on a mouse and a keyboard without being
+    /// recorded twice.
+    ///
+    /// `#[serde(default)]` keeps configs without a `[macros]` section loading
+    /// unchanged, so this needs no schema bump — the same reasoning as
+    /// `ui_scale` above.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub macros: BTreeMap<MacroId, Macro>,
 }
 
 impl Default for Config {
@@ -139,6 +155,7 @@ impl Default for Config {
             devices: BTreeMap::new(),
             ephemeral: false,
             keyboard: KeyboardConfig::default(),
+            macros: BTreeMap::new(),
         }
     }
 }

@@ -78,6 +78,10 @@ pub struct SharedRuntime {
     /// Live smooth-scroll and vertical sensitivity settings read without
     /// taking the orchestrator/config lock.
     pub scroll_preferences: Arc<ScrollPreferences>,
+    /// Recorded macros, keyed by the id an `Action::RunMacro` binding stores.
+    /// Shared with the button runtime, which looks a macro up on every press,
+    /// so it is republished on reload rather than rebuilt per dispatch.
+    pub macros: crate::runtime::macros::SharedMacros,
     pub dpi_cycle: Arc<RwLock<DpiCycles>>,
     /// One capture plan per online device — what to divert and how to
     /// dispatch, keyed by the device the events arrive on. Carries each
@@ -201,6 +205,7 @@ impl Orchestrator {
                 config.app_settings.smooth_scroll,
                 config.app_settings.vertical_scroll_sensitivity,
             )),
+            macros: Arc::new(RwLock::new(config.macros.clone())),
             dpi_cycle: Arc::new(RwLock::new(DpiCycles::default())),
             capture_plans: Arc::new(RwLock::new(Vec::new())),
             capture_channel: Arc::new(RwLock::new(None)),
@@ -767,6 +772,11 @@ impl Orchestrator {
             self.config.app_settings.smooth_scroll,
             self.config.app_settings.vertical_scroll_sensitivity,
         );
+        // A binding can only reach a macro that is in this table, so an edit
+        // to [macros] takes effect on reload like every other setting.
+        if let Ok(mut macros) = self.shared.macros.write() {
+            macros.clone_from(&self.config.macros);
+        }
         self.observable
             .set_launch_at_login(self.config.app_settings.launch_at_login);
         let retained_overrides: HashSet<String> = self

@@ -3,6 +3,7 @@
 use std::assert_matches;
 use std::collections::BTreeMap;
 
+use ghub_macro::MacroId;
 use serde::{Deserialize, Serialize};
 
 use super::*;
@@ -307,6 +308,7 @@ fn persisted_action_variant_names_are_stable() {
             "F2".parse()
                 .unwrap_or_else(|error| panic!("valid shortcut failed: {error}")),
         ),
+        Action::RunMacro(MacroId("hyper".into())),
     ]);
     let mut actual: Vec<String> = actions
         .into_iter()
@@ -361,6 +363,7 @@ fn persisted_action_variant_names_are_stable() {
         "ReopenTab",
         "RightClick",
         "RunAppleScript",
+        "RunMacro",
         "RunShellCommand",
         "Save",
         "Screenshot",
@@ -380,6 +383,15 @@ fn persisted_action_variant_names_are_stable() {
     ];
     expected.sort_unstable();
     assert_eq!(actual, expected);
+}
+
+/// The binding stores the id, never the macro. Renaming or re-recording a
+/// macro then leaves every button bound to it alone.
+#[test]
+fn run_macro_roundtrips_toml_by_id() {
+    let action = Action::RunMacro(MacroId("hyper".into()));
+    assert_eq!(roundtrip(&action), action);
+    assert_eq!(action.label(), "Run macro \"hyper\"");
 }
 
 #[test]
@@ -677,6 +689,12 @@ fn power_user_and_device_side_actions_lower_to_the_expected_bucket() {
         run_shell_command.effect(),
         Effect::Script(Script::ShellCommand("date"))
     );
+
+    // A macro run repeats until its press ends and must release what it
+    // pressed on every exit path, which no fire-and-forget injector call can
+    // do — so it lowers to the agent's side, like the DPI and ring actions.
+    let run_macro = Action::RunMacro(MacroId("hyper".into()));
+    assert_matches!(run_macro.effect(), Effect::AgentSide);
 
     let workflow = Action::Workflow(vec![]);
     assert_matches!(workflow.effect(), Effect::Script(Script::Workflow(&[])));
