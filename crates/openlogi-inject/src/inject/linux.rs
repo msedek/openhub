@@ -380,6 +380,14 @@ fn click(button: KeyCode) {
     emit(&[key_ev(button, 0), syn()]);
 }
 
+/// Inject one raw `EV_KEY` edge and its `SYN_REPORT`.
+///
+/// Deliberately unbalanced: the macro executor owns the matching release (see
+/// [`crate::post_key_code`]).
+pub(super) fn post_key_code(code: u16, pressed: bool) {
+    emit(&[key_ev(KeyCode(code), i32::from(pressed)), syn()]);
+}
+
 /// Inject a single relative-axis delta followed by `SYN_REPORT`.
 fn scroll(axis: RelativeAxisCode, value: i32) {
     emit(&[rel_ev(axis, value), syn()]);

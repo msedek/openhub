@@ -234,7 +234,8 @@ fn try_queue_action(tx: &mpsc::SyncSender<Action>, action: Action) -> bool {
     }
 }
 
-/// Remap path for Middle/Back/Forward. Must stay lock-light and non-blocking.
+/// Remap path for every button the OS hook decodes. Must stay lock-light and
+/// non-blocking.
 fn handle_button(
     id: ButtonId,
     pressed: bool,
@@ -242,7 +243,10 @@ fn handle_button(
     hooks: &SharedHookMaps,
     dispatcher: &ActionDispatcher,
 ) -> EventDisposition {
-    // Primary L/R always pass through (suppressing them would brick the mouse).
+    // Controls the hook never sees, and events from a source that may not be
+    // remapped, leave immediately — before any lock is touched. Whether a
+    // button the hook *does* see may be swallowed depends on its binding, and
+    // that decision waits for `binding_passes_through` below.
     if !id.is_os_hook_button() || !button_source_may_remap(device) {
         return EventDisposition::PassThrough;
     }
@@ -291,7 +295,7 @@ fn handle_button(
     let Some(binding) = binding else {
         return EventDisposition::PassThrough;
     };
-    if binding_is_native_click(id, &binding) {
+    if binding_passes_through(id, &binding) {
         return EventDisposition::PassThrough;
     }
     if pressed {
@@ -305,8 +309,22 @@ fn handle_button(
     FAIL_OPEN_PRESSES.with_borrow_mut(|s| remapped_release_disposition(id, s))
 }
 
-fn binding_is_native_click(id: ButtonId, binding: &Binding) -> bool {
-    !matches!(binding, Binding::LongPress(_)) && is_native_click(id, &binding.click_action())
+/// Whether the hook must leave this button's physical event to the desktop.
+///
+/// Two reasons, both of which apply to a press and its release alike. The
+/// binding may only reproduce what the button already does natively, in which
+/// case suppressing and re-synthesising it would be a round trip through the
+/// injector for nothing. Or the button's own floor may refuse to be swallowed
+/// at all — [`ButtonId::may_suppress`], which is what keeps a primary click
+/// with nothing bound to it working.
+fn binding_passes_through(id: ButtonId, binding: &Binding) -> bool {
+    if matches!(binding, Binding::LongPress(_)) {
+        // A threshold binding is always something explicitly bound, and its
+        // short action is only half of it, so neither reason applies.
+        return false;
+    }
+    let action = binding.click_action();
+    is_native_click(id, &action) || !id.may_suppress(&action)
 }
 
 /// Press of a remapped single-action button: suppress when the action was

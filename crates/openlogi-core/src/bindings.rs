@@ -96,8 +96,8 @@ pub fn hidpp_gesture_maps_for(
         .collect()
 }
 
-/// Per-direction maps for every OS-hook button (Middle/Back/Forward) in
-/// gesture mode on `config_key`, with `app_bundle`'s per-app overlay applied,
+/// Per-direction maps for every OS-hook *gesture* button (Middle/Back/Forward,
+/// per [`ButtonId::is_os_hook_gesture_button`]) in gesture mode on `config_key`, with `app_bundle`'s per-app overlay applied,
 /// for the OS hook to resolve a hold+swipe. Gesture mode is per-button (see
 /// [`Config::is_gesture_mode`]), so any number of entries may be live at once —
 /// concurrency between them is the hook's first-hold-wins policy, not a config
@@ -131,7 +131,7 @@ pub fn oshook_gestures_for(
     config
         .effective_bindings(key, app_bundle)
         .into_iter()
-        .filter(|(id, _)| id.is_os_hook_button())
+        .filter(|(id, _)| id.is_os_hook_gesture_button())
         .filter_map(|(id, binding)| match binding {
             Binding::Gesture(map) => Some((id, map)),
             Binding::Single(_) | Binding::LongPress(_) => None,

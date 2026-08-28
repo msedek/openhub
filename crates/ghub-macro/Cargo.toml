@@ -1,0 +1,25 @@
+[package]
+name = "ghub-macro"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Macro model and execution engine for OpenHub: G HUB's repeat modes with a hard release guarantee"
+
+[lints]
+workspace = true
+
+[features]
+default = ["exec"]
+# The run loop and its pacing. Split from the model because `openlogi-core`
+# needs only the data — a `MacroId` in a binding and a macro table in the
+# config — and is checked against `wasm32-unknown-unknown`, which has no
+# threads to run a macro on.
+exec = []
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+toml = { workspace = true }

@@ -3,6 +3,7 @@
 use std::assert_matches;
 use std::collections::BTreeMap;
 
+use ghub_macro::MacroId;
 use serde::{Deserialize, Serialize};
 
 use super::*;
@@ -307,6 +308,7 @@ fn persisted_action_variant_names_are_stable() {
             "F2".parse()
                 .unwrap_or_else(|error| panic!("valid shortcut failed: {error}")),
         ),
+        Action::RunMacro(MacroId("hyper".into())),
     ]);
     let mut actual: Vec<String> = actions
         .into_iter()
@@ -361,6 +363,7 @@ fn persisted_action_variant_names_are_stable() {
         "ReopenTab",
         "RightClick",
         "RunAppleScript",
+        "RunMacro",
         "RunShellCommand",
         "Save",
         "Screenshot",
@@ -380,6 +383,15 @@ fn persisted_action_variant_names_are_stable() {
     ];
     expected.sort_unstable();
     assert_eq!(actual, expected);
+}
+
+/// The binding stores the id, never the macro. Renaming or re-recording a
+/// macro then leaves every button bound to it alone.
+#[test]
+fn run_macro_roundtrips_toml_by_id() {
+    let action = Action::RunMacro(MacroId("hyper".into()));
+    assert_eq!(roundtrip(&action), action);
+    assert_eq!(action.label(), "Run macro \"hyper\"");
 }
 
 #[test]
@@ -533,6 +545,101 @@ fn wheel_tilt_defaults_to_the_scroll_its_firmware_already_does() {
     }
 }
 
+/// Suppression used to stop at the wheel click and the two thumb buttons, so a
+/// binding on anything else was advisory: the physical event reached the
+/// desktop anyway. The set is now every button the platform hooks actually
+/// decode.
+#[test]
+fn is_os_hook_button_covers_every_button_the_hook_decodes() {
+    for id in [
+        ButtonId::LeftClick,
+        ButtonId::RightClick,
+        ButtonId::MiddleClick,
+        ButtonId::Back,
+        ButtonId::Forward,
+        ButtonId::DpiToggle,
+    ] {
+        assert!(id.is_os_hook_button(), "{id} is decoded by the OS hook");
+    }
+    // The thumb wheel and the dedicated gesture controls arrive over HID++
+    // diversion; the hook never sees an event to suppress.
+    for id in [
+        ButtonId::Thumbwheel,
+        ButtonId::ThumbwheelScrollUp,
+        ButtonId::ThumbwheelScrollDown,
+        ButtonId::GestureButton,
+        ButtonId::HapticPanel,
+    ] {
+        assert!(!id.is_os_hook_button(), "{id} never reaches the OS hook");
+    }
+}
+
+/// Hosting a hold-and-swipe is narrower than being suppressible, and stayed
+/// where it was when suppression widened: holding is the gesture's begin edge,
+/// so a button already used for holding (drag, context menu) cannot be one.
+#[test]
+fn only_the_middle_and_thumb_buttons_host_os_hook_gestures() {
+    for id in [ButtonId::MiddleClick, ButtonId::Back, ButtonId::Forward] {
+        assert!(id.is_os_hook_gesture_button(), "{id} hosts gestures");
+    }
+    for id in [
+        ButtonId::LeftClick,
+        ButtonId::RightClick,
+        ButtonId::DpiToggle,
+    ] {
+        assert!(
+            !id.is_os_hook_gesture_button(),
+            "{id} must not become a swipe source"
+        );
+        assert!(
+            id.is_os_hook_button(),
+            "{id} is still suppressible — the two rules are separate"
+        );
+    }
+}
+
+/// The floor. A profile that swallows the primary click with nothing in its
+/// place leaves no way to reach the GUI and undo it, so the left button is
+/// suppressed only when the user explicitly bound something that does
+/// something — `Action::None` synthesises no event at all and is exactly the
+/// "nothing in its place" case.
+#[test]
+fn the_left_button_is_suppressed_only_when_something_is_bound_to_it() {
+    assert!(!ButtonId::LeftClick.may_suppress(&Action::None));
+    assert!(ButtonId::LeftClick.may_suppress(&Action::Copy));
+    assert!(ButtonId::LeftClick.may_suppress(&Action::LeftClick));
+}
+
+/// No other button carries the floor: silencing the secondary click or the
+/// button behind the wheel is a legitimate profile, and it is recoverable.
+#[test]
+fn no_other_button_carries_the_primary_clicks_floor() {
+    for id in [
+        ButtonId::RightClick,
+        ButtonId::MiddleClick,
+        ButtonId::Back,
+        ButtonId::Forward,
+        ButtonId::DpiToggle,
+    ] {
+        assert!(id.may_suppress(&Action::None), "{id} may be silenced");
+        assert!(id.may_suppress(&Action::Copy), "{id} may be rebound");
+    }
+}
+
+/// A control the hook never sees cannot be suppressed by it, whatever it is
+/// bound to — its events do not pass through the hook in the first place.
+#[test]
+fn a_control_the_hook_never_sees_is_never_suppressed_by_it() {
+    for id in [
+        ButtonId::Thumbwheel,
+        ButtonId::GestureButton,
+        ButtonId::WheelTiltLeft,
+        ButtonId::KeySearch,
+    ] {
+        assert!(!id.may_suppress(&Action::Copy), "{id} bypasses the OS hook");
+    }
+}
+
 // ── Effect classification ─────────────────────────────────────────────────
 //
 // `Action::effect()` is the platform-neutral IR `openlogi-inject`'s three
@@ -582,6 +689,12 @@ fn power_user_and_device_side_actions_lower_to_the_expected_bucket() {
         run_shell_command.effect(),
         Effect::Script(Script::ShellCommand("date"))
     );
+
+    // A macro run repeats until its press ends and must release what it
+    // pressed on every exit path, which no fire-and-forget injector call can
+    // do — so it lowers to the agent's side, like the DPI and ring actions.
+    let run_macro = Action::RunMacro(MacroId("hyper".into()));
+    assert_matches!(run_macro.effect(), Effect::AgentSide);
 
     let workflow = Action::Workflow(vec![]);
     assert_matches!(workflow.effect(), Effect::Script(Script::Workflow(&[])));

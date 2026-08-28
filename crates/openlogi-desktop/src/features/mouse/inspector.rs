@@ -187,7 +187,7 @@ fn button_inspector(
         })
         .when(
             data.editing_app.is_none()
-                && (button.is_hidpp_gesture_source() || button.is_os_hook_button()),
+                && (button.is_hidpp_gesture_source() || button.is_os_hook_gesture_button()),
             |panel| {
                 let observer = picker.view.clone();
                 panel.child(

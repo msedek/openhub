@@ -4,25 +4,28 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use super::Action;
+
 /// One of the user-rebindable hotspots on a Logi mouse. The order matches the
 /// physical layout from front to side; [`ButtonId::ALL`] is consumed by the
 /// default-binding generator and the popover trigger list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ButtonId {
-    /// The primary button. Rebindable in the config schema, but the OS hook
-    /// never suppresses it — see [`ButtonId::is_os_hook_button`].
+    /// The primary button. The OS hook sees it and may remap it, but it keeps
+    /// a floor no other button has — see [`ButtonId::may_suppress`].
     LeftClick,
-    /// The secondary button. Like [`ButtonId::LeftClick`], it always passes
-    /// through the OS hook.
+    /// The secondary button. Reaches the OS hook like [`ButtonId::LeftClick`],
+    /// with no floor of its own: bind it and it is suppressed.
     RightClick,
-    /// The wheel click — one of the three buttons the OS hook remaps.
+    /// The wheel click — one of the buttons the OS hook remaps.
     MiddleClick,
     /// The thumb-side "back" button (mouse button 4), remapped by the OS hook.
     Back,
     /// The thumb-side "forward" button (mouse button 5), remapped by the OS hook.
     Forward,
     /// The "ModeShift" button under the wheel — typically used for SmartShift /
-    /// DPI cycle. Named `DpiToggle` for historical reasons.
+    /// DPI cycle. Named `DpiToggle` for historical reasons. On a gaming mouse
+    /// this is `BTN_TASK`, which the OS hook sees like any other button.
     DpiToggle,
     /// The horizontal thumb wheel's click. Kept in [`ButtonId::ALL`] so its
     /// default still seeds and dispatches when the wheel is diverted, even
@@ -115,19 +118,67 @@ impl ButtonId {
         ButtonId::KeyVolumeUp,
     ];
 
-    /// Whether this button is one the OS hook (macOS `CGEventTap` / Linux evdev)
-    /// remaps: Middle, Back, or Forward. The primary L/R clicks always pass
-    /// through (suppressing them would brick the mouse), and the DPI / thumb /
-    /// dedicated gesture controls aren't visible to the OS hook at all (they're
-    /// captured over HID++). These are exactly the buttons that can become an
-    /// OS-hook gesture button, so the hook's remap gate and the gesture-owner
-    /// projection share this one definition.
+    /// Whether the OS hook (macOS `CGEventTap` / Linux evdev) sees this button
+    /// at all, and may therefore remap it.
+    ///
+    /// This is the set the platform hooks actually decode from the raw event
+    /// stream: `BTN_LEFT`, `BTN_RIGHT`, `BTN_MIDDLE`, `BTN_SIDE`, `BTN_EXTRA`
+    /// and `BTN_TASK` on Linux, and their equivalents elsewhere. The thumb
+    /// wheel, the wheel tilts and the dedicated gesture controls are absent
+    /// because they never reach the hook — they arrive over HID++ diversion.
+    ///
+    /// Seeing a button is not the same as being allowed to swallow it: that is
+    /// [`ButtonId::may_suppress`], which adds the primary click's floor.
     #[must_use]
     pub fn is_os_hook_button(self) -> bool {
         matches!(
             self,
+            ButtonId::LeftClick
+                | ButtonId::RightClick
+                | ButtonId::MiddleClick
+                | ButtonId::Back
+                | ButtonId::Forward
+                | ButtonId::DpiToggle
+        )
+    }
+
+    /// Whether this button may host an OS-hook hold-and-swipe gesture: the
+    /// wheel click and the two thumb buttons.
+    ///
+    /// A subset of [`ButtonId::is_os_hook_button`], and deliberately narrower
+    /// than it. Holding a button is the gesture's begin edge, so a control the
+    /// user holds for something else — dragging with the primary click, opening
+    /// a context menu with the secondary — cannot also be a swipe source
+    /// without breaking the thing it is already for.
+    #[must_use]
+    pub fn is_os_hook_gesture_button(self) -> bool {
+        matches!(
+            self,
             ButtonId::MiddleClick | ButtonId::Back | ButtonId::Forward
         )
+    }
+
+    /// Whether the OS hook may swallow this button's physical event, given the
+    /// action bound to it.
+    ///
+    /// Every button the hook sees is suppressible once it carries a binding —
+    /// that is what lets the button behind the wheel host a remap and the
+    /// secondary button become an auto-clicker. The primary click is the one
+    /// exception, and it is a safety floor rather than a preference: it is the
+    /// user's only route to the GUI that would undo the profile. A binding of
+    /// [`Action::None`] synthesises nothing at all, so suppressing the left
+    /// button for it would leave the desktop unclickable with no way back.
+    /// The button therefore keeps working unless the user explicitly put
+    /// something else in its place.
+    #[must_use]
+    pub fn may_suppress(self, action: &Action) -> bool {
+        if !self.is_os_hook_button() {
+            return false;
+        }
+        if matches!(self, ButtonId::LeftClick) {
+            return !matches!(action, Action::None);
+        }
+        true
     }
 
     /// Whether this button is a HID++ gesture source — a control that is

@@ -256,6 +256,37 @@ pub fn release_hold(combo: &KeyCombo) {
     hold_transition(Some(combo), None);
 }
 
+/// Synthesise one key or mouse-button edge addressed by its raw Linux input
+/// event code (`KEY_*` / `BTN_*` from `linux/input-event-codes.h`).
+///
+/// This is the macro engine's output path. Macro steps carry those codes
+/// verbatim — the same numbers the device model uses — rather than the
+/// semantic [`Action`] vocabulary, because a macro is a recording of physical
+/// key edges and has no semantics to lower through.
+///
+/// Balancing is the caller's job: `ghub_macro`'s executor keeps a ledger of
+/// what it pressed and drains it on every exit path, so this stays a single
+/// unbalanced edge by design.
+///
+/// Only Linux can honour it. The codes are Linux's, with no meaning to
+/// `CGEvent` or `SendInput`, so the other backends log and return rather than
+/// guess at a translation. A code the shared `uinput` device never declared is
+/// dropped by the kernel, which is the same silent no-op as an unmapped
+/// action.
+pub fn post_key_code(code: u16, pressed: bool) {
+    cfg_select! {
+        target_os = "linux" => {
+            linux::post_key_code(code, pressed);
+        }
+        _ => {
+            let _ = (code, pressed);
+            tracing::debug!(
+                "raw input-code output is Linux-only — macro step skipped"
+            );
+        }
+    }
+}
+
 /// Replace one held chord without releasing physical keys shared by both.
 pub fn replace_hold(old: &KeyCombo, new: &KeyCombo) {
     hold_transition(Some(old), Some(new));
