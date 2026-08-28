@@ -2664,6 +2664,14 @@ name = "ghub-hidpp-gaming"
 version = "0.8.1"
 
 [[package]]
+name = "ghub-macro"
+version = "0.8.1"
+dependencies = [
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "ghub-models"
 version = "0.8.1"
 dependencies = [

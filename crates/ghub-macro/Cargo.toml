@@ -1,0 +1,17 @@
+[package]
+name = "ghub-macro"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Macro model and execution engine for OpenHub: G HUB's repeat modes with a hard release guarantee"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+toml = { workspace = true }
