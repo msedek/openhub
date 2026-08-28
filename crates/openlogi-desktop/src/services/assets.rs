@@ -1,17 +1,10 @@
 //! Device asset resolution and cache management.
 //!
-//! At render time [`AssetResolver::resolve`] probes (in order):
-//!
-//! 1. The macOS app bundle's `Contents/Resources/assets/` — populated at
-//!    packaging time by `openlogi assets sync` and shipped with every
-//!    release. Zero network at end-user runtime.
-//! 2. The per-user cache at `~/.local/share/openlogi/assets/` —
-//!    populated by [`sync::sync`] when it runs (debug builds and the
-//!    bundle-missing safety net).
-//!
-//! Either tier missing the requested files falls through to the next, and
-//! ultimately to the synthetic silhouette. The write side ([`sync::sync`])
-//! always targets the user cache — the bundle is read-only.
+//! OpenHub product art is generated in-repository and embedded into the binary.
+//! A known model resolves from that local catalog; an unknown model returns
+//! `None` and uses the synthetic silhouette. Legacy filesystem helpers remain
+//! temporarily isolated behind their unit tests while the inherited asset
+//! subsystem is removed in later migration work.
 
 mod glow;
 mod images;
@@ -21,6 +14,7 @@ pub mod sync;
 
 pub(crate) use self::glow::GlowGeometry;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -29,11 +23,13 @@ use openlogi_assets::{
     BUTTONS_RENDER_FILES, DeviceEntry, FRONT_RENDER_FILES, Index, METADATA_FILES, Metadata,
 };
 use openlogi_core::device::{DeviceKind, DeviceModelInfo};
+use serde::Deserialize;
 use tracing::{debug, warn};
 use walkdir::WalkDir;
 
 use self::images::{buttons_image_for, load_manifest, read_png_dimensions, variant_image_for};
-use self::paths::{bundle_assets_root, load_index, user_cache_root};
+use self::paths::user_cache_root;
+use crate::app_assets::device_geometry_jsons;
 
 /// Total bytes of the per-user asset cache — the tier [`sync`] writes and
 /// [`clear_cache`] removes. The read-only app bundle (release builds) is a
@@ -102,6 +98,179 @@ fn open_in_file_manager(path: &Path) {
     }
 }
 
+/// Canvas dimensions shared by generated vector art, rasters, and markers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct DeviceCanvas {
+    /// Canonical canvas width.
+    pub width: u16,
+    /// Canonical canvas height.
+    pub height: u16,
+}
+
+/// Physical dimensions recorded with the hardware-verified device definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct PhysicalDimensions {
+    /// Front-to-tail length in millimetres.
+    pub length: u32,
+    /// Maximum body width in millimetres.
+    pub width: u32,
+    /// Maximum body height in millimetres.
+    pub height: u32,
+}
+
+/// Hardware identifiers that map a live device to generated art.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct DeviceIdentifiers {
+    /// HID++ model identifiers written as lowercase hexadecimal strings.
+    pub hidpp_model_ids: Vec<String>,
+    /// USB product identifiers written as lowercase hexadecimal strings.
+    pub usb_product_ids: Vec<String>,
+}
+
+/// Identity and dimensions for one generated device.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct LocalDevice {
+    /// Stable directory and catalog identifier.
+    pub id: String,
+    /// Human-facing product name.
+    pub name: String,
+    /// Device family used by gallery presentation.
+    pub kind: String,
+    /// Coordinate system used by every marker.
+    pub canvas: DeviceCanvas,
+    /// Measured physical size.
+    pub physical_dimensions_mm: PhysicalDimensions,
+    /// Stable protocol and transport identities.
+    pub identifiers: DeviceIdentifiers,
+}
+
+/// Logical control currently understood by the inherited binding UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceControl {
+    /// Primary left click.
+    LeftClick,
+    /// Primary right click.
+    RightClick,
+    /// Scroll-wheel press.
+    MiddleClick,
+    /// Rear navigation side button.
+    Back,
+    /// Front navigation side button.
+    Forward,
+    /// DPI or mode-shift button.
+    DpiToggle,
+}
+
+/// Label gutter selected by the device author.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeviceLabelSide {
+    /// Label appears to the left of the illustration.
+    Left,
+    /// Label appears to the right of the illustration.
+    Right,
+}
+
+/// One marker point in canonical canvas units.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+pub struct DevicePoint {
+    /// Horizontal canvas coordinate.
+    pub x: f32,
+    /// Vertical canvas coordinate.
+    pub y: f32,
+}
+
+/// Verified evdev identity for a physical control.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct DeviceEvdevCode {
+    /// Linux input-event symbolic name.
+    pub name: String,
+    /// Linux input-event numeric code.
+    pub code: u16,
+}
+
+/// One physical, selectable device slot.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct DeviceSlot {
+    /// Hardware-facing slot id such as `g4`.
+    pub id: String,
+    /// Temporary bridge to the inherited `ButtonId` UI.
+    pub control: DeviceControl,
+    /// Human description of the physical location.
+    pub physical_location: String,
+    /// Verified Linux event identity.
+    pub evdev: DeviceEvdevCode,
+    /// Click marker in canonical canvas coordinates.
+    pub marker: DevicePoint,
+    /// Preferred label gutter.
+    pub label_side: DeviceLabelSide,
+}
+
+/// One independently tintable physical lighting zone.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct DeviceLightingZone {
+    /// Stable zone id used by future lighting configuration.
+    pub id: String,
+    /// Element id in the generated SVG.
+    pub svg_element: String,
+    /// Raster height to generated alpha-mask filename.
+    pub masks: BTreeMap<String, String>,
+}
+
+/// Versioned geometry document embedded beside generated device art.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct DeviceGeometry {
+    /// Schema discriminator; currently exactly `1`.
+    pub schema_version: u32,
+    /// Model identity and coordinate system.
+    pub device: LocalDevice,
+    /// Physical buttons in stable G-number order.
+    pub slots: Vec<DeviceSlot>,
+    /// Real, independently tintable lighting regions.
+    pub lighting_zones: Vec<DeviceLightingZone>,
+}
+
+impl DeviceGeometry {
+    fn is_valid(&self) -> bool {
+        let dimensions = self.device.physical_dimensions_mm;
+        self.schema_version == 1
+            && DeviceKind::from_registry_type(&self.device.kind).is_some()
+            && self.device.canvas.width > 0
+            && self.device.canvas.height > 0
+            && dimensions.length > 0
+            && dimensions.width > 0
+            && dimensions.height > 0
+            && !self.device.identifiers.hidpp_model_ids.is_empty()
+            && !self.device.identifiers.usb_product_ids.is_empty()
+            && !self.slots.is_empty()
+            && self.slots.iter().all(|slot| {
+                !slot.id.is_empty()
+                    && !slot.physical_location.is_empty()
+                    && !slot.evdev.name.is_empty()
+                    && slot.marker.x >= 0.0
+                    && slot.marker.x <= f32::from(self.device.canvas.width)
+                    && slot.marker.y >= 0.0
+                    && slot.marker.y <= f32::from(self.device.canvas.height)
+            })
+            && self.lighting_zones.iter().all(|zone| {
+                !zone.id.is_empty()
+                    && !zone.svg_element.is_empty()
+                    && zone.masks.contains_key("120")
+                    && zone.masks.contains_key("320")
+            })
+    }
+
+    fn matches(&self, model: &DeviceModelInfo) -> bool {
+        self.device
+            .identifiers
+            .hidpp_model_ids
+            .iter()
+            .filter_map(|id| u16::from_str_radix(id, 16).ok())
+            .any(|id| model.model_ids.contains(&id))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedAsset {
     pub depot: String,
@@ -113,16 +282,22 @@ pub struct ResolvedAsset {
     /// `None` when the registry type was missing/unmodelled: no asset opinion.
     pub kind: Option<DeviceKind>,
     pub image_path: PathBuf,
+    /// Embedded GPUI resource for the interactive render, when locally generated.
+    pub image_resource: Option<String>,
     /// The front/hero render (`device_image`, typically `front_*.png`) used for
     /// the device gallery cards — distinct from [`Self::image_path`], which is
     /// the side/buttons view the mouse model aligns hotspots against. `None`
     /// when the depot ships no front render.
     pub hero_image_path: Option<PathBuf>,
+    /// Embedded GPUI resource for the 120 px gallery render.
+    pub hero_image_resource: Option<String>,
     /// Precomputed inter-key lighting holes for a light-up keyboard, decoded
     /// from the depot's baked RLE mask and painted live over the device image
     /// (see [`crate::app::glow_canvas`]). `None` for depots without a mask.
     pub glow: Option<Arc<GlowGeometry>>,
     pub metadata: Metadata,
+    /// OpenHub-authored absolute marker and lighting geometry.
+    pub device_geometry: Option<DeviceGeometry>,
     /// Actual pixel dimensions of `image_path`. Logi's
     /// `core_metadata.json` `origin` field tracks the *bbox of the mouse
     /// silhouette inside* the PNG — the PNG ships with extra transparent
@@ -131,6 +306,23 @@ pub struct ResolvedAsset {
     /// real buttons.
     pub png_width: u32,
     pub png_height: u32,
+}
+
+impl ResolvedAsset {
+    /// Return the image source used by the interactive model and lighting panel.
+    pub fn image_source(&self) -> gpui::ImageSource {
+        self.image_resource
+            .clone()
+            .map_or_else(|| self.image_path.clone().into(), Into::into)
+    }
+
+    /// Return the image source used by the device gallery.
+    pub fn hero_image_source(&self) -> Option<gpui::ImageSource> {
+        self.hero_image_resource
+            .clone()
+            .map(Into::into)
+            .or_else(|| self.hero_image_path.clone().map(Into::into))
+    }
 }
 
 pub struct AssetResolver {
@@ -150,20 +342,11 @@ pub struct AssetResolver {
 impl AssetResolver {
     pub fn new() -> Self {
         let write_root = user_cache_root();
-        let bundle = bundle_assets_root();
-        let has_bundle = bundle.is_some();
-        let mut read_roots = Vec::with_capacity(2);
-        if let Some(b) = bundle {
-            debug!(path = %b.display(), "bundle assets root detected");
-            read_roots.push(b);
-        }
-        read_roots.push(write_root.clone());
-        let index = load_index(&read_roots);
         Self {
-            read_roots,
+            read_roots: Vec::new(),
             write_root,
-            has_bundle,
-            index,
+            has_bundle: false,
+            index: None,
         }
     }
 
@@ -193,6 +376,9 @@ impl AssetResolver {
         model: &DeviceModelInfo,
         codename: Option<&str>,
     ) -> Option<ResolvedAsset> {
+        if let Some(asset) = resolve_local_asset(model) {
+            return Some(asset);
+        }
         let index = self.index.as_ref()?;
         let (depot, entry) = resolve_in_index(index, model, codename)?;
         self.load_files(depot, entry, model)
@@ -329,9 +515,12 @@ impl AssetResolver {
                 display_name: entry.display_name.clone(),
                 kind,
                 image_path,
+                image_resource: None,
                 hero_image_path,
+                hero_image_resource: None,
                 glow,
                 metadata,
+                device_geometry: None,
                 png_width,
                 png_height,
             });
@@ -378,12 +567,15 @@ impl AssetResolver {
                 display_name: entry.display_name.clone(),
                 kind: DeviceKind::from_registry_type(&entry.kind),
                 image_path: image_path.clone(),
+                image_resource: None,
                 hero_image_path: Some(image_path),
+                hero_image_resource: None,
                 glow: None,
                 // Standalone-light rendering intentionally consumes only the
                 // verified front image; shared metadata remains for HID++
                 // button hotspots in `load_files`.
                 metadata: Metadata::default(),
+                device_geometry: None,
                 png_width,
                 png_height,
             });
@@ -391,6 +583,34 @@ impl AssetResolver {
         debug!(depot, "standalone asset cache miss across all roots");
         None
     }
+}
+
+fn resolve_local_asset(model: &DeviceModelInfo) -> Option<ResolvedAsset> {
+    device_geometry_jsons().iter().find_map(|json| {
+        let geometry: DeviceGeometry = serde_json::from_str(json).ok()?;
+        if !geometry.is_valid() || !geometry.matches(model) {
+            return None;
+        }
+        let device_id = &geometry.device.id;
+        let canvas = geometry.device.canvas;
+        let png_height = 320_u32;
+        let png_width = (u32::from(canvas.width) * png_height + u32::from(canvas.height) / 2)
+            / u32::from(canvas.height);
+        Some(ResolvedAsset {
+            depot: device_id.clone(),
+            display_name: geometry.device.name.clone(),
+            kind: DeviceKind::from_registry_type(&geometry.device.kind),
+            image_path: PathBuf::new(),
+            image_resource: Some(format!("device-assets/{device_id}/device-{png_height}.png")),
+            hero_image_path: None,
+            hero_image_resource: Some(format!("device-assets/{device_id}/device-120.png")),
+            glow: None,
+            metadata: Metadata::default(),
+            device_geometry: Some(geometry),
+            png_width,
+            png_height,
+        })
+    })
 }
 
 impl Default for AssetResolver {
@@ -564,6 +784,43 @@ mod tests {
             model_ids: [0; 3],
             extended_model_id: 0,
         }
+    }
+
+    fn g703_model() -> DeviceModelInfo {
+        DeviceModelInfo {
+            model_ids: [0x4086, 0, 0],
+            ..bare_model()
+        }
+    }
+
+    #[test]
+    fn g703_resolves_from_the_embedded_catalog() {
+        let asset = AssetResolver::new()
+            .resolve(&g703_model(), Some("G703 LIGHTSPEED HERO"))
+            .expect("G703 should resolve without a filesystem or network asset source");
+
+        assert_eq!(asset.depot, "g703_hero");
+        assert_eq!(
+            asset.image_resource,
+            Some("device-assets/g703_hero/device-320.png")
+        );
+        assert_eq!(
+            asset.hero_image_resource,
+            Some("device-assets/g703_hero/device-120.png")
+        );
+        let geometry = asset
+            .device_geometry
+            .expect("embedded G703 art must carry local geometry");
+        assert_eq!(
+            (geometry.device.canvas.width, geometry.device.canvas.height),
+            (320, 560)
+        );
+        assert_eq!(geometry.slots.len(), 6);
+    }
+
+    #[test]
+    fn unknown_model_has_no_local_product_art() {
+        assert!(AssetResolver::new().resolve(&bare_model(), None).is_none());
     }
 
     /// A 24-byte PNG: signature + an `IHDR` chunk header carrying only the

@@ -7,7 +7,7 @@ use openlogi_core::binding::ButtonId;
 
 use super::hotspots::{Hotspot, MOUSE_MODEL_SIZE, MouseControlId};
 use super::leader_lines::{Label, Side};
-use crate::services::assets::ResolvedAsset;
+use crate::services::assets::{DeviceControl, DeviceLabelSide, ResolvedAsset};
 
 /// Approx pixel width of each hotspot hit-target. Logitech only gives us a
 /// marker point per button, not a rectangle, so we size by hand.
@@ -58,15 +58,20 @@ pub fn asset_dimensions_for_png(asset: &ResolvedAsset, target_h: f32, max_w: f32
 /// model reserves a side gutter for their leader-line labels); keyboards and
 /// other label-less devices don't, so the model can hand them the full width.
 pub fn asset_has_button_labels(asset: &ResolvedAsset) -> bool {
+    if let Some(geometry) = &asset.device_geometry {
+        return !geometry.slots.is_empty();
+    }
     asset
         .metadata
         .assignments()
         .any(|a| map_slot_name(&a.slot_name).is_some())
 }
 
-/// Convert Logitech's percent-based markers into mouse-local pixel rects,
-/// translating from the metadata's "origin" coord system (the silhouette
-/// bbox) into the actual rendered PNG coord system.
+/// Convert authored marker points into mouse-local pixel rects.
+///
+/// OpenHub geometry uses absolute coordinates in the generated art's canvas.
+/// The compatibility path below retains the inherited percent/origin mapping
+/// for isolated legacy tests.
 ///
 /// Logi's markers are percentages of `origin` (the silhouette bbox).
 /// Within the actual PNG, that bbox is centred with equal padding on the
@@ -88,6 +93,26 @@ pub fn asset_has_button_labels(asset: &ResolvedAsset) -> bool {
     reason = "device images are < 4096 px on either axis — well within f32 mantissa"
 )]
 pub fn asset_hotspots_for_png(asset: &ResolvedAsset, mouse_w: f32, mouse_h: f32) -> Vec<Hotspot> {
+    if let Some(geometry) = &asset.device_geometry {
+        let canvas_w = f32::from(geometry.device.canvas.width);
+        let canvas_h = f32::from(geometry.device.canvas.height);
+        return geometry
+            .slots
+            .iter()
+            .map(|slot| {
+                let cx = slot.marker.x / canvas_w * mouse_w;
+                let cy = slot.marker.y / canvas_h * mouse_h;
+                Hotspot {
+                    id: map_device_control(slot.control),
+                    x: cx - ASSET_HOTSPOT / 2.,
+                    y: cy - ASSET_HOTSPOT / 2.,
+                    w: ASSET_HOTSPOT,
+                    h: ASSET_HOTSPOT,
+                }
+            })
+            .collect();
+    }
+
     let png_w = asset.png_width as f32;
     let origin_w = asset
         .metadata
@@ -130,10 +155,6 @@ pub fn asset_hotspots_for_png(asset: &ResolvedAsset, mouse_w: f32, mouse_h: f32)
 /// right, then orders each side by hotspot height. Back and Forward stay
 /// adjacent when both are on the same side because they form one navigation
 /// pair, even when another marker sits between them.
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "hotspot count is bounded by ButtonId variants — well under f32 mantissa"
-)]
 pub fn labels_from_hotspots(
     hotspots: &[Hotspot],
     mouse_h: f32,
@@ -163,6 +184,54 @@ pub fn labels_from_hotspots(
         }
     }
 
+    position_labels(hotspots, mouse_h, &mut labels);
+    labels
+}
+
+/// Lay out labels using explicit sides from OpenHub-authored device geometry.
+///
+/// Narrow layouts still collapse every card to the left; at full width the
+/// author's side is authoritative and only vertical spacing is computed here.
+pub fn asset_labels_from_hotspots(
+    asset: &ResolvedAsset,
+    hotspots: &[Hotspot],
+    mouse_h: f32,
+    distribution: LabelDistribution,
+) -> Vec<Label> {
+    let Some(geometry) = &asset.device_geometry else {
+        return labels_from_hotspots(hotspots, mouse_h, distribution);
+    };
+    let mut labels: Vec<Label> = hotspots
+        .iter()
+        .map(|hotspot| {
+            let side = if distribution == LabelDistribution::LeftOnly {
+                Side::Left
+            } else {
+                geometry
+                    .slots
+                    .iter()
+                    .find(|slot| map_device_control(slot.control) == hotspot.id)
+                    .map_or(Side::Left, |slot| match slot.label_side {
+                        DeviceLabelSide::Left => Side::Left,
+                        DeviceLabelSide::Right => Side::Right,
+                    })
+            };
+            Label {
+                id: hotspot.id,
+                side,
+                y: 0.,
+            }
+        })
+        .collect();
+    position_labels(hotspots, mouse_h, &mut labels);
+    labels
+}
+
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "hotspot count is bounded by ButtonId variants — well under f32 mantissa"
+)]
+fn position_labels(hotspots: &[Hotspot], mouse_h: f32, labels: &mut [Label]) {
     for side in [Side::Left, Side::Right] {
         let mut vertical_order: Vec<usize> = labels
             .iter()
@@ -198,8 +267,6 @@ pub fn labels_from_hotspots(
             labels[second].y -= adjustment;
         }
     }
-
-    labels
 }
 
 /// Label positions for the synthetic fallback silhouette.
@@ -243,10 +310,38 @@ fn map_slot_name(name: &str) -> Option<MouseControlId> {
     }
 }
 
+fn map_device_control(control: DeviceControl) -> MouseControlId {
+    let button = match control {
+        DeviceControl::LeftClick => ButtonId::LeftClick,
+        DeviceControl::RightClick => ButtonId::RightClick,
+        DeviceControl::MiddleClick => ButtonId::MiddleClick,
+        DeviceControl::Back => ButtonId::Back,
+        DeviceControl::Forward => ButtonId::Forward,
+        DeviceControl::DpiToggle => ButtonId::DpiToggle,
+    };
+    button.into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::features::mouse::hotspots::default_hotspots;
+    use crate::services::assets::AssetResolver;
+    use openlogi_core::device::{DeviceModelInfo, DeviceTransports};
+
+    fn g703_asset() -> ResolvedAsset {
+        let model = DeviceModelInfo {
+            entity_count: 0,
+            serial_number: None,
+            unit_id: [0; 4],
+            transports: DeviceTransports::default(),
+            model_ids: [0x4086, 0, 0],
+            extended_model_id: 0,
+        };
+        AssetResolver::new()
+            .resolve(&model, Some("G703 LIGHTSPEED HERO"))
+            .expect("G703 local art")
+    }
 
     #[test]
     fn default_labels_include_capability_gated_thumbwheel() {
@@ -366,5 +461,40 @@ mod tests {
 
         assert!(labels.iter().any(|label| label.side == Side::Left));
         assert!(labels.iter().any(|label| label.side == Side::Right));
+    }
+
+    #[test]
+    fn local_markers_scale_from_absolute_canvas_coordinates() {
+        let asset = g703_asset();
+        let hotspots = asset_hotspots_for_png(&asset, 160., 280.);
+        let g1 = hotspots
+            .iter()
+            .find(|hotspot| hotspot.id == MouseControlId::Button(ButtonId::LeftClick))
+            .expect("G1 hotspot");
+
+        assert_eq!(g1.center(), (58., 56.));
+    }
+
+    #[test]
+    fn local_labels_honor_the_authored_gutters() {
+        let asset = g703_asset();
+        let hotspots = asset_hotspots_for_png(&asset, 160., 280.);
+        let labels =
+            asset_labels_from_hotspots(&asset, &hotspots, 280., LabelDistribution::BothSides);
+
+        for (button, expected_side) in [
+            (ButtonId::LeftClick, Side::Left),
+            (ButtonId::RightClick, Side::Right),
+            (ButtonId::MiddleClick, Side::Right),
+            (ButtonId::Back, Side::Left),
+            (ButtonId::Forward, Side::Left),
+            (ButtonId::DpiToggle, Side::Right),
+        ] {
+            let label = labels
+                .iter()
+                .find(|label| label.id == MouseControlId::Button(button))
+                .expect("every G703 slot has a label");
+            assert_eq!(label.side, expected_side, "wrong side for {button:?}");
+        }
     }
 }

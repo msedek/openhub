@@ -17,7 +17,7 @@ use openlogi_core::binding::{Action, ButtonId, GestureDirection, default_binding
 
 use super::geometry::{
     LABEL_H, LabelDistribution, asset_dimensions_for_png, asset_has_button_labels,
-    asset_hotspots_for_png, default_labels, labels_from_hotspots,
+    asset_hotspots_for_png, asset_labels_from_hotspots, default_labels,
 };
 use super::hotspots::{Hotspot, MOUSE_MODEL_SIZE, MouseControlId, default_hotspots};
 use super::inspector::{BindingInspectorData, binding_inspector};
@@ -431,7 +431,7 @@ fn scaled_model(
     if let Some(a) = asset {
         let (w, h) = asset_dimensions_for_png(a, target_h, max_w);
         let hotspots = asset_hotspots_for_png(a, w, h);
-        let labels = labels_from_hotspots(&hotspots, h, label_distribution);
+        let labels = asset_labels_from_hotspots(a, &hotspots, h, label_distribution);
         (w, h, hotspots, labels)
     } else {
         let scale = (target_h / MOUSE_MODEL_SIZE.1).min(max_w / MOUSE_MODEL_SIZE.0);
@@ -497,7 +497,7 @@ fn breathing_art(
     glow: Option<(Arc<GlowGeometry>, Hsla)>,
 ) -> impl IntoElement {
     let device_art: AnyElement = match asset {
-        Some(a) => img(a.image_path.clone())
+        Some(a) => img(a.image_source())
             .w(px(mouse_w))
             .h(px(mouse_h))
             .into_any_element(),

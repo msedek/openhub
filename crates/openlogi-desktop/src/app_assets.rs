@@ -19,6 +19,13 @@ const LOGO_BYTES: &[u8] = include_bytes!(concat!(
     "/../../design/icon/openlogi.png"
 ));
 
+include!(concat!(env!("OUT_DIR"), "/builtin_device_assets.rs"));
+
+/// Generated local device geometry documents embedded in the application.
+pub(crate) fn device_geometry_jsons() -> &'static [&'static str] {
+    DEVICE_GEOMETRY_JSON
+}
+
 /// GPUI asset source: the app logo, the shared ring glyphs, then
 /// gpui-component's bundled icons for everything else.
 pub struct AppAssets;
@@ -27,6 +34,12 @@ impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         if path == LOGO {
             return Ok(Some(Cow::Borrowed(LOGO_BYTES)));
+        }
+        if let Some((_, bytes)) = DEVICE_ASSET_BYTES
+            .iter()
+            .find(|(resource_path, _)| *resource_path == path)
+        {
+            return Ok(Some(Cow::Borrowed(*bytes)));
         }
         if let Some(bytes) = ActionIcons.load(path)? {
             return Ok(Some(bytes));

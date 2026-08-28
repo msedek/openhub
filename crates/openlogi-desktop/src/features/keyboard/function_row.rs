@@ -1394,7 +1394,9 @@ mod tests {
             display_name: "G513".to_string(),
             kind: Some(DeviceKind::Keyboard),
             image_path: PathBuf::from("/tmp/g513.png"),
+            image_resource: None,
             hero_image_path: None,
+            hero_image_resource: None,
             glow: None,
             metadata: Metadata {
                 images: vec![ImageEntry {
@@ -1406,6 +1408,7 @@ mod tests {
                     assignments,
                 }],
             },
+            device_geometry: None,
             png_width: png.0,
             png_height: png.1,
         }
@@ -1417,7 +1420,9 @@ mod tests {
             display_name: "MX Keys S for Mac".to_string(),
             kind: Some(DeviceKind::Keyboard),
             image_path: PathBuf::from("/tmp/mx-keys.png"),
+            image_resource: None,
             hero_image_path: None,
+            hero_image_resource: None,
             glow: None,
             metadata: Metadata {
                 images: vec![
@@ -1439,6 +1444,7 @@ mod tests {
                     },
                 ],
             },
+            device_geometry: None,
             png_width: 1872,
             png_height: 728,
         }

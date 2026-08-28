@@ -76,7 +76,7 @@ fn product_image(asset: &ResolvedAsset, width: f32, height: f32, online: bool) -
         // `size_full` lets transparent product artwork escape this slot when
         // its intrinsic aspect ratio differs from the slot. Keep the source
         // aspect ratio while bounding both dimensions to the slot.
-        .child(img(asset.image_path.clone()).max_w_full().max_h_full())
+        .child(img(asset.image_source()).max_w_full().max_h_full())
 }
 
 fn visual_container() -> gpui::Div {

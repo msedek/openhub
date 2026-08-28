@@ -1,17 +1,14 @@
-//! Background sync against OpenLogi's asset mirrors.
+//! Retained legacy asset-sync types used by the runtime state machine.
 //!
-//! Always fetches `index.json` first — even with no devices connected, so
-//! the registry is on disk before the first device needs resolving. Then,
-//! for each connected device with a [`DeviceModelInfo`], resolves the
-//! matching depot from that fresh index and downloads any per-device files
-//! we don't already have cached (or whose sha256 differs). Failures bubble
-//! up to the caller's retry/backoff; the GUI falls back to whatever's
-//! currently on disk and ultimately to the synthetic silhouette.
+//! OpenHub device art is generated and embedded locally. Registry loading is
+//! blocked before any HTTP operation and startup sync is permanently disabled;
+//! the remaining helpers stay compiled only while the inherited settings and
+//! query state are migrated away from remote assets.
 
 use std::fs;
 use std::path::Path;
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use openlogi_assets::http;
 use openlogi_assets::{
     AssetRegistry, AssetSource, BUTTONS_RENDER_FILES, DepotManifest, DeviceEntry, FetchOutcome,
@@ -20,24 +17,9 @@ use openlogi_core::config::AssetSourcePreference;
 use openlogi_core::device::DeviceModelInfo;
 use tracing::{debug, info, warn};
 
-/// Whether the startup HTTP sync should run on this launch.
-///
-/// Policy:
-/// - `OPENLOGI_SYNC=off` → never run.
-/// - `OPENLOGI_SYNC=on` → always run.
-/// - Debug builds → run (so devs see registry updates immediately).
-/// - Release builds → run only when the app bundle didn't ship assets
-///   (safety net for malformed bundles or hand-built binaries).
-pub fn should_run(has_bundle: bool) -> bool {
-    match std::env::var("OPENLOGI_SYNC").ok().as_deref() {
-        Some("off" | "false" | "0") => return false,
-        Some("on" | "true" | "1") => return true,
-        _ => {}
-    }
-    if cfg!(debug_assertions) {
-        return true;
-    }
-    !has_bundle
+/// Remote device-asset synchronization never runs in OpenHub.
+pub fn should_run(_has_bundle: bool) -> bool {
+    false
 }
 
 /// One model-level asset lookup requested by the GUI.
@@ -91,21 +73,8 @@ pub(crate) fn model_key(target: &AssetTarget) -> String {
 /// target shares: probing three mirrors once per device would be the whole cost
 /// of the sync paid N times. Cached under its own key so the depot fetches
 /// depend on it instead of each redoing it.
-pub fn load_registry(source: Option<AssetSource>) -> Result<AssetRegistry> {
-    let cache_root = super::paths::user_cache_root();
-    fs::create_dir_all(&cache_root)
-        .with_context(|| format!("create cache root {}", cache_root.display()))?;
-    let registry = AssetRegistry::load_source(source, &cache_root).context("fetch asset index")?;
-    // `OPENLOGI_FORCE_DEPOT` names a depot with no device behind it, so it has
-    // no target to ride in on. It belongs to whoever loads the registry — and
-    // `ext = 0` gets its base PNG.
-    if let Ok(forced) = std::env::var("OPENLOGI_FORCE_DEPOT")
-        && let Some(entry) = registry.index().devices.get(&forced).cloned()
-        && let Err(e) = sync_depot(registry.client(), &cache_root, &forced, &entry, 0)
-    {
-        warn!(depot = %forced, error = %e, "forced depot sync failed");
-    }
-    Ok(registry)
+pub fn load_registry(_source: Option<AssetSource>) -> Result<AssetRegistry> {
+    bail!("remote device registry loading is disabled; OpenHub device art is local-only")
 }
 
 /// Download what one device model needs, against an already-loaded registry.
@@ -300,9 +269,15 @@ fn source_for_sync(
 
 #[cfg(test)]
 mod tests {
-    use super::{AssetTarget, model_key, source_for_sync};
+    use super::{AssetTarget, load_registry, model_key, source_for_sync};
     use openlogi_assets::AssetSource;
     use openlogi_core::config::AssetSourcePreference;
+
+    #[test]
+    fn remote_registry_loading_is_disabled() {
+        let error = load_registry(None).expect_err("OpenHub device art is local-only");
+        assert!(error.to_string().contains("local-only"));
+    }
 
     #[test]
     fn automatic_preference_races_the_built_in_sources() {

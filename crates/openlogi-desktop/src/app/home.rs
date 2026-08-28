@@ -36,7 +36,7 @@ use super::widgets::{
     add_device_button, connectivity_dot, kind_label, route_label, settings_button,
 };
 use crate::features::lighting::visual as light_visual;
-use crate::services::assets::GlowGeometry;
+use crate::services::assets::{GlowGeometry, ResolvedAsset};
 use crate::state::{AppState, DeviceRecord, StateEvent};
 use crate::ui::battery::{BatteryIndicator, glance_hint};
 use crate::ui::components::control_input;
@@ -552,12 +552,12 @@ fn device_image(
         )
         .into_any_element();
     }
-    if let Some(path) = record
+    if let Some(source) = record
         .asset
         .as_ref()
-        .and_then(|a| a.hero_image_path.clone())
+        .and_then(ResolvedAsset::hero_image_source)
     {
-        return img(path).max_w_full().max_h_full().into_any_element();
+        return img(source).max_w_full().max_h_full().into_any_element();
     }
     // Cameras carry no depot asset, so give them a recognisable glyph on their
     // gallery card instead of the generic chip fallback.
