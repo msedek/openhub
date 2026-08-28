@@ -1,20 +1,42 @@
 OpenHub
 Copyright © 2026 Miguel Sedek and the OpenHub contributors.
 
+OpenHub is licensed under the GNU General Public License version 3 or later.
+See LICENSE.
+
+--------------------------------------------------------------------------------
+
+Why GPL, when the code this forked was permissive
+
+OpenHub is a hard fork of OpenLogi, which is dual-licensed MIT OR Apache-2.0.
+This project ships the device illustrations from Piper (below), which are
+GPL-2.0-or-later, and combining copyleft artwork into a distributed work makes
+the whole work copyleft. That was a deliberate trade: accurate illustrations of
+76 devices, with their button anchor points already placed, in exchange for
+copyleft.
+
+The inherited OpenLogi code remains available under its own MIT/Apache-2.0
+terms from upstream. Relicensing a combined work does not, and cannot,
+retroactively change the licence of anyone else's contribution — it only states
+the terms under which this combination is distributed.
+
+--------------------------------------------------------------------------------
+
 This product includes software developed by the OpenLogi project:
 
     OpenLogi — a native, local-first alternative to Logitech Options+
     https://github.com/AprilNEA/OpenLogi
     Copyright © 2026 AprilNEA and the OpenLogi contributors
     Licensed under MIT OR Apache-2.0
+    See LICENSE-MIT and LICENSE-APACHE.
 
-OpenHub is a hard fork of OpenLogi, taken at commit b32ae087 on 2026-08-27.
-The complete OpenLogi git history is preserved in this repository, so every
-commit retains its original author. The two projects have different goals:
-OpenLogi targets Logitech Options+ and productivity peripherals; OpenHub
-targets Logitech G HUB and gaming peripherals — per-game profiles, macros with
-repeat modes, and the HID++ features that gaming mice expose (0x8100 onboard
-profiles, 0x8110 button spy).
+OpenHub was taken from OpenLogi at commit b32ae087 on 2026-08-27. The complete
+OpenLogi git history is preserved in this repository, so every inherited commit
+keeps its original author. The two projects have different goals: OpenLogi
+targets Logitech Options+ and productivity peripherals; OpenHub targets
+Logitech G HUB and gaming peripherals — per-game profiles, macros with repeat
+modes, and the HID++ features gaming mice expose (0x8100 onboard profiles,
+0x8110 button spy).
 
 OpenHub is an independent project. It is not endorsed by, affiliated with, or
 supported by the OpenLogi project or its authors. Please do not report OpenHub
@@ -22,7 +44,21 @@ issues to the OpenLogi tracker.
 
 --------------------------------------------------------------------------------
 
-Third-party components inherited from OpenLogi:
+This product includes device illustrations from the Piper project:
+
+    Piper — GTK configuration tool for libratbag
+    https://github.com/libratbag/piper
+    Copyright © 2016-2022 the libratbag team
+    Licensed under GPL-2.0-or-later, used here as GPL-3.0-or-later
+    Vendored unmodified at design/devices/svg/.
+
+They carry more than the drawing: each file names its buttons and lit zones and
+places their callout anchors, following the format documented in
+design/devices/svg/SVG-FORMAT.md. See design/devices/svg/README.md.
+
+--------------------------------------------------------------------------------
+
+Other third-party components:
 
     hidpp — https://crates.io/crates/hidpp
     Copyright © lus
@@ -49,8 +85,21 @@ Third-party components inherited from OpenLogi:
 
 --------------------------------------------------------------------------------
 
+Removed rather than inherited
+
+The OpenLogi brand assets that once occupied design/ are © 2026 AprilNEA, all
+rights reserved, and their licence explicitly withholds permission for forks to
+use them. Every one was replaced with original artwork. No OpenLogi brand asset
+is distributed by this repository.
+
+The product renders that OpenLogi fetches from assets.openlogi.org were
+extracted from Logitech's own G HUB and Options+ installers. OpenHub does not
+fetch, bundle, or display them.
+
+--------------------------------------------------------------------------------
+
 Trademarks
 
-Not affiliated with Logitech. "Logitech", "G HUB", "Options+", "Lightspeed" and
-"MX Master" are trademarks of Logitech International S.A., used here only to
-describe the hardware and software this project interoperates with.
+Not affiliated with Logitech. "Logitech", "G HUB", "Options+", "Lightspeed",
+"HERO" and "MX Master" are trademarks of Logitech International S.A., used here
+only to describe the hardware and software this project interoperates with.

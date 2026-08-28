@@ -39,7 +39,7 @@ edition = "2024"
 # Raise this freely the day a release lands something worth using; the `msrv`
 # CI matrix keeps the number honest for `cargo install`.
 rust-version = "1.98"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/AprilNEA/OpenLogi"
 authors = ["AprilNEA <dev@aprilnea.me>"]
 description = "Lightweight, local-first alternative to Logitech Options+ for HID++ devices"
