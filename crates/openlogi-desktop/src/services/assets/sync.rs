@@ -275,7 +275,11 @@ mod tests {
 
     #[test]
     fn remote_registry_loading_is_disabled() {
-        let error = load_registry(None).expect_err("OpenHub device art is local-only");
+        // `expect_err` would need `Debug` on the Ok type, and `AssetRegistry`
+        // does not implement it — match on the result instead.
+        let Err(error) = load_registry(None) else {
+            panic!("OpenHub device art is local-only, so loading a remote registry must fail");
+        };
         assert!(error.to_string().contains("local-only"));
     }
 

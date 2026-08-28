@@ -14,10 +14,11 @@ use gpui_component::{
     v_flex,
 };
 use openlogi_core::binding::{Action, ButtonId, GestureDirection, default_binding};
+use openlogi_core::device::DeviceKind;
 
 use super::geometry::{
     LABEL_H, LabelDistribution, asset_dimensions_for_png, asset_has_button_labels,
-    asset_hotspots_for_png, asset_labels_from_hotspots, default_labels,
+    asset_hotspots_for_png, default_labels, labels_from_hotspots,
 };
 use super::hotspots::{Hotspot, MOUSE_MODEL_SIZE, MouseControlId, default_hotspots};
 use super::inspector::{BindingInspectorData, binding_inspector};
@@ -26,7 +27,7 @@ use super::picker::{GESTURE_BUTTON_ICON, action_icon_path};
 use super::thumbwheel::ThumbwheelPreset;
 use crate::app::{glow_canvas, keyboard_glow};
 use crate::features::profile_scope::{friendly_app_name, profile_canvas_status};
-use crate::services::assets::{GlowGeometry, ResolvedAsset};
+use crate::services::assets::{GlowGeometry, ResolvedAsset, fallback_asset};
 use crate::state::{AppState, StateEvent};
 use crate::ui::action::localized_action_label;
 use crate::ui::theme::{self, ACCENT_BLUE, Typography as _};
@@ -59,6 +60,10 @@ const MODEL_MIN_CONTENT_W: f32 = 200.;
 struct MouseWorkspaceData<'a> {
     device_key: Option<&'a str>,
     asset: Option<&'a ResolvedAsset>,
+    /// What the device is. Only a pointing device gets the generic mouse
+    /// outline when its model is not in the art registry — a keyboard or a
+    /// webcam would rather show nothing than a picture of a mouse.
+    kind: Option<DeviceKind>,
     active: Option<MouseControlId>,
     bindings: &'a BTreeMap<ButtonId, Action>,
     gesture_maps: &'a BTreeMap<ButtonId, BTreeMap<GestureDirection, Action>>,
@@ -77,6 +82,7 @@ impl<'a> MouseWorkspaceData<'a> {
             asset: state
                 .current_record()
                 .and_then(|record| record.asset.as_ref()),
+            kind: state.current_record().map(|record| record.kind),
             active: state
                 .active_button()
                 .map(MouseControlId::from_active_button),
@@ -105,6 +111,7 @@ impl<'a> MouseWorkspaceData<'a> {
         Self {
             device_key: None,
             asset: None,
+            kind: None,
             active: None,
             bindings,
             gesture_maps,
@@ -238,6 +245,7 @@ impl Render for MouseModelView {
         let MouseWorkspaceData {
             device_key,
             asset,
+            kind,
             active,
             bindings,
             gesture_maps,
@@ -247,6 +255,13 @@ impl Render for MouseModelView {
             overridden,
         } = MouseWorkspaceData::read(cx)
             .unwrap_or_else(|| MouseWorkspaceData::empty(&empty_bindings, &empty_gesture_maps));
+
+        // A pointing device the vendored registry does not list still gets a
+        // drawing — Piper's `fallback.svg` placeholder, with the hotspots its
+        // own artwork names (see `assets::fallback_asset` for what that drawing
+        // actually is). Anything else keeps the synthetic silhouette.
+        let fallback = (asset.is_none() && wants_mouse_art(kind)).then(fallback_asset);
+        let asset = asset.or(fallback.as_ref());
 
         self.reset_for_device(device_key);
 
@@ -376,6 +391,20 @@ struct ModelLayout {
     labels: Vec<Label>,
 }
 
+/// Whether a device with no registry entry should still be drawn as a mouse.
+///
+/// Trackballs and touchpads are configured through the same buttons panel and
+/// read as pointing devices; an unclassified device is assumed to be one,
+/// since this panel is where it is being shown.
+fn wants_mouse_art(kind: Option<DeviceKind>) -> bool {
+    matches!(
+        kind,
+        None | Some(
+            DeviceKind::Mouse | DeviceKind::Trackball | DeviceKind::Touchpad | DeviceKind::Unknown
+        )
+    )
+}
+
 /// Scale the model to fit the content area in both axes. A tall mouse is bound
 /// by the viewport height; a wide keyboard is bound by the available width and
 /// drops the label gutter so it remains centred.
@@ -431,7 +460,7 @@ fn scaled_model(
     if let Some(a) = asset {
         let (w, h) = asset_dimensions_for_png(a, target_h, max_w);
         let hotspots = asset_hotspots_for_png(a, w, h);
-        let labels = asset_labels_from_hotspots(a, &hotspots, h, label_distribution);
+        let labels = labels_from_hotspots(&hotspots, h, label_distribution);
         (w, h, hotspots, labels)
     } else {
         let scale = (target_h / MOUSE_MODEL_SIZE.1).min(max_w / MOUSE_MODEL_SIZE.0);

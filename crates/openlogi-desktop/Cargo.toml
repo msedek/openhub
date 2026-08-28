@@ -57,10 +57,18 @@ derive_more = { version = "2.1.1", default-features = false, features = ["displa
 # app's icon after the fact.
 appicon = { git = "https://github.com/AprilNEA/appicon", tag = "v0.1.1" }
 
-# Held at the version Cargo.lock already has for gpui's own build-dependency;
-# bumping it independently would move the pinned gpui rev.
+# All held at versions Cargo.lock already resolves for gpui's own graph;
+# bumping one independently would move the pinned gpui rev.
 [build-dependencies]
 embed-resource = "3.0.9"
+# Measures the vendored Piper device drawings: resolves Inkscape layer
+# transforms and path outlines into the absolute button/LED rectangles the GUI
+# turns into hotspots. `default-features = false` drops font loading — the
+# drawings carry no text.
+usvg = { version = "0.45.1", default-features = false }
+# Byte-exact element ranges, used to cut Piper's callout-leader layers out of a
+# drawing without disturbing anything else in the file.
+roxmltree = "0.20.0"
 
 # Window chrome, host OS string, and installed-app icon lookup only — the
 # menu-bar status item lives in the agent, not here.

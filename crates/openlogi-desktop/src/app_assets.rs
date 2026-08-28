@@ -1,9 +1,10 @@
 //! The settings app's GPUI [`AssetSource`].
 //!
 //! Composes the ring glyphs every frontend shares ([`openlogi_ui::action_icons`])
-//! with the two sources only this app draws from: its embedded logo, and
-//! gpui-component's bundled lucide set behind `IconName`. The overlay links
-//! neither, which is why they live here and not in the shared crate.
+//! with the sources only this app draws from: its embedded logo, the vendored
+//! device drawings ([`crate::services::device_art`]), and gpui-component's
+//! bundled lucide set behind `IconName`. The overlay links none of them, which
+//! is why they live here and not in the shared crate.
 
 use std::borrow::Cow;
 
@@ -19,15 +20,8 @@ const LOGO_BYTES: &[u8] = include_bytes!(concat!(
     "/../../design/icon/openlogi.png"
 ));
 
-include!(concat!(env!("OUT_DIR"), "/builtin_device_assets.rs"));
-
-/// Generated local device geometry documents embedded in the application.
-pub(crate) fn device_geometry_jsons() -> &'static [&'static str] {
-    DEVICE_GEOMETRY_JSON
-}
-
-/// GPUI asset source: the app logo, the shared ring glyphs, then
-/// gpui-component's bundled icons for everything else.
+/// GPUI asset source: the app logo, the embedded device drawings, the shared
+/// ring glyphs, then gpui-component's bundled icons for everything else.
 pub struct AppAssets;
 
 impl AssetSource for AppAssets {
@@ -35,11 +29,8 @@ impl AssetSource for AppAssets {
         if path == LOGO {
             return Ok(Some(Cow::Borrowed(LOGO_BYTES)));
         }
-        if let Some((_, bytes)) = DEVICE_ASSET_BYTES
-            .iter()
-            .find(|(resource_path, _)| *resource_path == path)
-        {
-            return Ok(Some(Cow::Borrowed(*bytes)));
+        if let Some(bytes) = crate::services::device_art::art_bytes(path) {
+            return Ok(Some(Cow::Borrowed(bytes)));
         }
         if let Some(bytes) = ActionIcons.load(path)? {
             return Ok(Some(bytes));

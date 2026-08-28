@@ -4,7 +4,9 @@ OpenLogi is a native, local-first alternative to Logitech Options+ written in Ru
 button remapping, DPI, SmartShift, and per-app profiles for Logitech HID++ devices
 (Bolt/Unifying receiver, Bluetooth-direct, wired) — no account, no telemetry, plain-TOML
 config. macOS and Linux are first-class; Windows is a young but shipping port.
-Dual-licensed MIT/Apache-2.0; the `design/` brand assets are proprietary.
+Licensed GPL-3.0-or-later — see NOTICE for why a fork of a permissive project
+is copyleft. The device illustrations under `design/devices/svg/` are Piper's,
+vendored unmodified; changes to them belong upstream in Piper, not here.
 
 The developer handbook (toolchain, packaging, release pipeline) is
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). This file is the agent-facing contract:

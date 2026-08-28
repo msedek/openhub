@@ -1196,7 +1196,9 @@ mod tests {
         let cache = AssetResolver::new();
         let rec = offline_record("2b034", &id, &cache);
         assert_eq!(rec.config_key, "2b034");
-        assert_eq!(rec.display_name, "MX Master 3S");
+        // The art registry names the model it recognised — `b034` is the BTLE
+        // MX Master 3S — and an asset name still outranks the persisted one.
+        assert_eq!(rec.display_name, "Logitech MX Master 3S");
         assert!(!rec.online);
         assert!(rec.route.is_none());
         assert_eq!(rec.capabilities, Some(id.capabilities));

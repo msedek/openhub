@@ -11,13 +11,16 @@
 //! `OPENLOGI_THEMES_DIR` overrides the lookup with an explicit path to the
 //! gpui-component `themes/` directory, as an escape hatch.
 //!
-//! Uses only `std` plus `embed-resource` on purpose: a build-dependency the
-//! resolver hasn't seen would re-resolve the lockfile and bump the
-//! precisely-pinned (Cargo.lock-only) gpui rev — so the `cargo metadata` JSON
-//! is scanned for `manifest_path` values directly rather than parsed with
-//! serde, and `embed-resource` (for [`embed_windows_resources`]) is pinned to
-//! the exact version already in the lock as gpui's own build-dependency, which
-//! adds an edge, not a crate.
+//! It also turns the vendored Piper device drawings into an embedded geometry
+//! table — see [`generate_device_art_registry`].
+//!
+//! Every build-dependency here is one the lockfile already resolves: a crate
+//! the resolver hasn't seen would re-resolve the lockfile and bump the
+//! precisely-pinned (Cargo.lock-only) gpui rev. So the `cargo metadata` JSON is
+//! scanned for `manifest_path` values directly rather than parsed with serde,
+//! and `embed-resource` (for [`embed_windows_resources`]), `usvg` and
+//! `roxmltree` (for the device art) are all held at versions gpui's own graph
+//! already pulls in — each adds an edge, not a crate.
 
 #![expect(
     clippy::expect_used,
@@ -58,65 +61,512 @@ fn main() {
     }
     generated.push_str("];\n");
     fs::write(out.join("builtin_themes.rs"), generated).expect("write builtin_themes.rs");
-    generate_device_asset_registry(&out);
+    generate_device_art_registry(&out);
 }
 
-/// Generate one embedded-resource table from every device definition.
+/// Generate the embedded device-art registry from the vendored Piper SVGs.
 ///
-/// The build script discovers device directories instead of naming models, so
-/// adding original art requires only a generated `design/devices/<id>/` folder.
-fn generate_device_asset_registry(out: &Path) {
-    let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
-        .join("../../design/devices");
-    println!("cargo:rerun-if-changed={}", root.display());
+/// Everything the GUI needs about a device drawing is settled here, at build
+/// time: which USB ids select which drawing, the device-only SVG the renderer
+/// draws, and where every `buttonN` / `ledN` sits inside it. The runtime never
+/// parses SVG to find a button, and a drawing that stops matching the format
+/// contract fails the build instead of the user's screen.
+///
+/// Each vendored file carries three Inkscape layers — `Device`, `Buttons`,
+/// `LEDs` — where the latter two are callout leaders drawn for Piper's own
+/// layout. This app draws its own leader lines, so only the `Device` layer is
+/// kept and the canvas is cropped to it; that also removes the wide empty
+/// gutter the leaders live in, which would otherwise shrink the device to half
+/// the panel.
+fn generate_device_art_registry(out: &Path) {
+    let svg_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+        .join("../../design/devices/svg");
+    println!("cargo:rerun-if-changed={}", svg_dir.display());
 
-    let mut device_dirs: Vec<PathBuf> = fs::read_dir(&root)
-        .unwrap_or_else(|e| panic!("cannot read device assets at {}: {e}", root.display()))
-        .map(|entry| entry.expect("read a device asset entry").path())
-        .filter(|path| path.is_dir() && path.join("geometry.json").is_file())
+    let mut sources: Vec<PathBuf> = fs::read_dir(&svg_dir)
+        .unwrap_or_else(|e| panic!("cannot read device art at {}: {e}", svg_dir.display()))
+        .map(|entry| entry.expect("read a device art entry").path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "svg"))
         .collect();
-    device_dirs.sort();
+    sources.sort();
+    assert!(
+        sources
+            .iter()
+            .any(|path| path.file_name() == Some("fallback.svg".as_ref())),
+        "design/devices/svg must ship fallback.svg — it is what an unlisted device is drawn as"
+    );
+
+    let dest = out.join("device-art");
+    fs::create_dir_all(&dest).expect("create OUT_DIR/device-art");
+
+    let mut arts: Vec<DeviceArt> = Vec::with_capacity(sources.len());
+    for path in &sources {
+        let stem = path
+            .file_stem()
+            .expect("an `.svg` path has a file stem")
+            .to_string_lossy()
+            .into_owned();
+        let source = fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        arts.push(extract_device_art(&stem, &source));
+    }
+    for art in &arts {
+        fs::write(dest.join(format!("{}.svg", art.stem)), &art.device_only)
+            .expect("write device-only art into OUT_DIR");
+    }
+
+    let lookup_path = svg_dir.join("svg-lookup.ini");
+    println!("cargo:rerun-if-changed={}", lookup_path.display());
+    let lookup_source = fs::read_to_string(&lookup_path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", lookup_path.display()));
+    let lookup = parse_svg_lookup(&lookup_source);
+
+    let index_of = |stem: &str| {
+        arts.iter()
+            .position(|art| art.stem == stem)
+            .unwrap_or_else(|| {
+                panic!("svg-lookup.ini names {stem}.svg, which is not in design/devices/svg")
+            })
+    };
 
     let mut generated = String::from(
-        "// @generated by build.rs from design/devices.\n\
-         static DEVICE_ASSET_BYTES: &[(&str, &[u8])] = &[\n",
+        "// @generated by build.rs from design/devices/svg — do not edit.\n\
+         /// Every device drawing, cropped to its `Device` layer and embedded.\n\
+         static DEVICE_ART: &[DeviceArt] = &[\n",
     );
-    let mut geometries = Vec::with_capacity(device_dirs.len());
-    for dir in device_dirs {
-        let device_id = dir
-            .file_name()
-            .expect("device directory has a name")
-            .to_string_lossy();
-        let mut pngs: Vec<PathBuf> = fs::read_dir(&dir)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
-            .map(|entry| entry.expect("read a generated device asset").path())
-            .filter(|path| path.extension().is_some_and(|extension| extension == "png"))
-            .collect();
-        pngs.sort();
-        for png in pngs {
-            let filename = png
-                .file_name()
-                .expect("PNG path has a file name")
-                .to_string_lossy();
-            writeln!(
-                generated,
-                "    (\"device-assets/{device_id}/{filename}\", include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../../design/devices/{device_id}/{filename}\"))),"
-            )
-            .expect("writing to a String cannot fail");
-        }
-        geometries.push(device_id.into_owned());
-    }
-    generated.push_str("];\nstatic DEVICE_GEOMETRY_JSON: &[&str] = &[\n");
-    for device_id in geometries {
+    for art in &arts {
         writeln!(
             generated,
-            "    include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../../design/devices/{device_id}/geometry.json\")),"
+            "    DeviceArt {{\n        \
+                 resource: \"{resource}{stem}.svg\",\n        \
+                 canvas: ArtSize {{ width: {width:.1}, height: {height:.1} }},\n        \
+                 buttons: &[{buttons}],\n        \
+                 leds: &[{leds}],\n    }},",
+            resource = DEVICE_ART_RESOURCE_PREFIX,
+            stem = art.stem,
+            width = art.width,
+            height = art.height,
+            buttons = render_anchors(&art.buttons),
+            leds = render_anchors(&art.leds),
         )
         .expect("writing to a String cannot fail");
     }
-    generated.push_str("];\n");
-    fs::write(out.join("builtin_device_assets.rs"), generated)
-        .expect("write builtin_device_assets.rs");
+    generated.push_str("];\n\n/// The embedded bytes of every drawing above, keyed by resource path.\nstatic DEVICE_ART_BYTES: &[(&str, &[u8])] = &[\n");
+    for art in &arts {
+        writeln!(
+            generated,
+            "    (\"{DEVICE_ART_RESOURCE_PREFIX}{stem}.svg\", include_bytes!(concat!(env!(\"OUT_DIR\"), \"/device-art/{stem}.svg\"))),",
+            stem = art.stem,
+        )
+        .expect("writing to a String cannot fail");
+    }
+    generated.push_str("];\n\n/// `svg-lookup.ini`, resolved to indices into [`DEVICE_ART`].\nstatic DEVICE_ART_MATCHES: &[DeviceArtMatch] = &[\n");
+    for entry in &lookup {
+        let ids = entry
+            .ids
+            .iter()
+            .map(|(vendor, product)| format!("({vendor:#06x}, {product:#06x})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(
+            generated,
+            "    DeviceArtMatch {{ name: \"{name}\", usb_ids: &[{ids}], art: {art} }},",
+            name = entry.name,
+            art = index_of(&entry.stem),
+        )
+        .expect("writing to a String cannot fail");
+    }
+    generated.push_str("];\n\n");
+    writeln!(
+        generated,
+        "/// Piper's placeholder drawing, served for a device with no entry.\n\
+         const FALLBACK_ART: usize = {};",
+        index_of("fallback")
+    )
+    .expect("writing to a String cannot fail");
+    fs::write(out.join("builtin_device_art.rs"), generated).expect("write builtin_device_art.rs");
+}
+
+/// Resource prefix the GPUI asset source answers device drawings on.
+/// Mirrored by `services::device_art`.
+const DEVICE_ART_RESOURCE_PREFIX: &str = "device-art/";
+
+/// How much blank space to leave around the device when cropping, in SVG user
+/// units. Enough that a thick outline stroke is never clipped by rounding.
+const DEVICE_ART_MARGIN: f32 = 4.0;
+
+/// Longer side, in pixels, that every cropped drawing declares.
+///
+/// The declared size is the only thing GPUI's SVG path has to go on: it
+/// rasterises at twice it, once, and scales the texture from there. Left at the
+/// file's own user units that is a lottery — these drawings are authored
+/// anywhere from 77 to 470 units across — and the small ones would arrive at
+/// the panel visibly soft. 600 px is a little above the tallest the mouse model
+/// ever draws, so the 1200 px raster still has a device pixel per pixel on a 2×
+/// display.
+const DEVICE_ART_RENDER_MAX: f32 = 600.0;
+
+/// One `buttonN` or `ledN` element, in the cropped drawing's coordinates.
+struct ArtAnchor {
+    index: u32,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+/// One device drawing, ready to be written into the generated table.
+struct DeviceArt {
+    stem: String,
+    device_only: String,
+    width: f32,
+    height: f32,
+    buttons: Vec<ArtAnchor>,
+    leds: Vec<ArtAnchor>,
+}
+
+/// One `svg-lookup.ini` section.
+struct ArtLookup {
+    name: String,
+    ids: Vec<(u16, u16)>,
+    stem: String,
+}
+
+/// Format a set of anchors as Rust struct literals.
+///
+/// One decimal place, deliberately. It is finer than the rendered pixel these
+/// coordinates end up in — and more precision than a stroke bounding box
+/// flattened from Bézier curves honestly carries — while keeping every emitted
+/// literal short enough that Clippy's `approx_constant` cannot mistake a
+/// measurement for π or τ. A generated table has no way to suppress that lint
+/// without suppressing it for real code too.
+fn render_anchors(anchors: &[ArtAnchor]) -> String {
+    anchors
+        .iter()
+        .map(|anchor| {
+            format!(
+                "ArtAnchor {{ index: {index}, x: {x:.1}, y: {y:.1}, width: {width:.1}, height: {height:.1} }}",
+                index = anchor.index,
+                x = anchor.x,
+                y = anchor.y,
+                width = anchor.width,
+                height = anchor.height,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Crop one vendored drawing to its device and read every anchor out of it.
+///
+/// The drawing is recomposed twice from the same body: once on its own
+/// `viewBox`, to measure the device in the file's user units, and once on a
+/// `viewBox` cropped to that measurement. Every anchor is then measured on the
+/// cropped document, so the coordinates handed to the GUI are by construction
+/// the ones the renderer will draw into — a drawing whose declared size scales
+/// its `viewBox` (many of these do, by 3.78×) cannot put the geometry and the
+/// image in different coordinate systems.
+fn extract_device_art(stem: &str, source: &str) -> DeviceArt {
+    let options = usvg::Options::default();
+    let body = read_device_body(stem, source);
+
+    // Measured on a 1:1 document, so the bounds come back in the file's own
+    // user units — the space a `viewBox` is written in.
+    let (view_x, view_y, view_width, view_height) = body.view_box;
+    let unscaled = compose_svg(&body, view_x, view_y, view_width, view_height, 1.0);
+    let bounds = device_bounds(stem, &unscaled, &options);
+    let (crop_x, crop_y) = (
+        bounds.x() - DEVICE_ART_MARGIN,
+        bounds.y() - DEVICE_ART_MARGIN,
+    );
+    let (crop_width, crop_height) = (
+        bounds.width() + 2.0 * DEVICE_ART_MARGIN,
+        bounds.height() + 2.0 * DEVICE_ART_MARGIN,
+    );
+    let device_only = compose_svg(
+        &body,
+        crop_x,
+        crop_y,
+        crop_width,
+        crop_height,
+        DEVICE_ART_RENDER_MAX / crop_width.max(crop_height),
+    );
+
+    let cropped = usvg::Tree::from_str(&device_only, &options)
+        .unwrap_or_else(|e| panic!("cropping {stem}.svg produced an unparsable SVG: {e}"));
+    let Some(usvg::Node::Group(device)) = cropped.node_by_id("Device") else {
+        panic!("cropping {stem}.svg dropped its `Device` layer");
+    };
+    let mut anchors = Vec::new();
+    collect_anchors(device, &mut anchors);
+    let buttons = take_anchors(stem, &anchors, "button");
+    let leds = take_anchors(stem, &anchors, "led");
+
+    DeviceArt {
+        stem: stem.to_owned(),
+        device_only,
+        width: cropped.size().width(),
+        height: cropped.size().height(),
+        buttons,
+        leds,
+    }
+}
+
+/// The bounding box of a composed drawing's `Device` layer.
+fn device_bounds(stem: &str, composed: &str, options: &usvg::Options) -> usvg::Rect {
+    let tree = usvg::Tree::from_str(composed, options)
+        .unwrap_or_else(|e| panic!("{stem}.svg is not a parsable SVG: {e}"));
+    let Some(usvg::Node::Group(device)) = tree.node_by_id("Device") else {
+        panic!("{stem}.svg has no `Device` layer — see design/devices/svg/SVG-FORMAT.md");
+    };
+    device.abs_stroke_bounding_box()
+}
+
+/// Collect every identified shape in a layer, with its absolute bounds.
+fn collect_anchors(group: &usvg::Group, out: &mut Vec<(String, usvg::Rect)>) {
+    for node in group.children() {
+        match node {
+            usvg::Node::Group(child) => {
+                out.push((child.id().to_owned(), child.abs_stroke_bounding_box()));
+                collect_anchors(child, out);
+            }
+            usvg::Node::Path(path) => {
+                out.push((path.id().to_owned(), path.abs_stroke_bounding_box()));
+            }
+            usvg::Node::Image(image) => {
+                out.push((image.id().to_owned(), image.abs_bounding_box()));
+            }
+            usvg::Node::Text(_) => {}
+        }
+    }
+}
+
+/// Pull every `{prefix}N` anchor out of a collected layer, in index order.
+fn take_anchors(stem: &str, anchors: &[(String, usvg::Rect)], prefix: &str) -> Vec<ArtAnchor> {
+    let mut found: Vec<ArtAnchor> = Vec::new();
+    for (id, bounds) in anchors {
+        let Some(index) = id
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        assert!(
+            !found.iter().any(|anchor| anchor.index == index),
+            "{stem}.svg declares `{prefix}{index}` twice"
+        );
+        found.push(ArtAnchor {
+            index,
+            x: bounds.x(),
+            y: bounds.y(),
+            width: bounds.width(),
+            height: bounds.height(),
+        });
+    }
+    found.sort_by_key(|anchor| anchor.index);
+    found
+}
+
+/// One drawing reduced to what a cropped document needs: its namespace
+/// declarations, its original `viewBox`, and the markup of its `Device` layer.
+struct SvgBody {
+    /// `(prefix, uri)` declarations from the root element. The kept markup uses
+    /// `inkscape:` and `sodipodi:` attributes, so dropping these would produce
+    /// a document no XML parser accepts.
+    namespaces: Vec<(Option<String>, String)>,
+    /// The original `viewBox`, as `(x, y, width, height)`.
+    view_box: (f32, f32, f32, f32),
+    /// Everything inside the root element except the other top-level layers.
+    body: String,
+}
+
+/// Strip a drawing down to its `Device` layer.
+///
+/// Piper's `Buttons` and `LEDs` layers hold callout leaders drawn for its own
+/// widget layout; this app draws its own, and the leaders reach across a gutter
+/// two thirds as wide as the canvas. They are cut out at the byte ranges the
+/// XML parser reports, so nothing else in the file is disturbed.
+fn read_device_body(stem: &str, source: &str) -> SvgBody {
+    let document = roxmltree::Document::parse(source)
+        .unwrap_or_else(|e| panic!("{stem}.svg is not well-formed XML: {e}"));
+    let root = document.root_element();
+    let range = root.range();
+    assert!(
+        source[range.clone()].starts_with("<svg"),
+        "{stem}.svg does not have a plain `<svg>` root element"
+    );
+    let body_start = range.start + end_of_start_tag(&source[range.clone()]);
+    let body_end = source[..range.end]
+        .rfind('<')
+        .expect("a `<svg>` element has a closing tag");
+
+    let mut body = String::new();
+    let mut cursor = body_start;
+    for child in root.children().filter(roxmltree::Node::is_element) {
+        if child.tag_name().name() == "g" && child.attribute("id") != Some("Device") {
+            let dropped = child.range();
+            body.push_str(&source[cursor..dropped.start]);
+            cursor = dropped.end;
+        }
+    }
+    body.push_str(&source[cursor..body_end]);
+
+    let namespaces = root
+        .namespaces()
+        // `xml` is predeclared by every parser; re-emitting it is redundant.
+        .filter(|namespace| namespace.name() != Some("xml"))
+        .map(|namespace| {
+            (
+                namespace.name().map(str::to_owned),
+                namespace.uri().to_owned(),
+            )
+        })
+        .collect();
+
+    SvgBody {
+        namespaces,
+        view_box: parse_view_box(stem, &root),
+        body,
+    }
+}
+
+/// Read a root element's `viewBox`.
+fn parse_view_box(stem: &str, root: &roxmltree::Node) -> (f32, f32, f32, f32) {
+    let attribute = root
+        .attribute("viewBox")
+        .unwrap_or_else(|| panic!("{stem}.svg has no viewBox"));
+    let values: Vec<f32> = attribute
+        .split([' ', ',', '\t', '\n'])
+        .filter(|token| !token.is_empty())
+        .map(|token| {
+            token
+                .parse::<f32>()
+                .unwrap_or_else(|e| panic!("{stem}.svg has a malformed viewBox `{attribute}`: {e}"))
+        })
+        .collect();
+    let [x, y, width, height] = values[..] else {
+        panic!("{stem}.svg viewBox `{attribute}` is not four numbers");
+    };
+    (x, y, width, height)
+}
+
+/// Rebuild a document from a stripped body, on the given canvas.
+///
+/// The `viewBox` is the canvas in the file's own user units; `scale` sets the
+/// declared width and height, and so the space anything measured on the result
+/// comes back in. The cropped drawing is composed at the scale that normalises
+/// it to [`DEVICE_ART_RENDER_MAX`], which is therefore also the space the
+/// geometry table is in — the geometry cannot disagree with the image, because
+/// both are read off the same document.
+fn compose_svg(body: &SvgBody, x: f32, y: f32, width: f32, height: f32, scale: f32) -> String {
+    let (pixel_width, pixel_height) = (width * scale, height * scale);
+    let mut svg = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg");
+    for (prefix, uri) in &body.namespaces {
+        match prefix {
+            Some(prefix) => write!(svg, " xmlns:{prefix}=\"{uri}\""),
+            None => write!(svg, " xmlns=\"{uri}\""),
+        }
+        .expect("writing to a String cannot fail");
+    }
+    write!(
+        svg,
+        " width=\"{pixel_width:.3}\" height=\"{pixel_height:.3}\" viewBox=\"{x:.3} {y:.3} {width:.3} {height:.3}\">"
+    )
+    .expect("writing to a String cannot fail");
+    svg.push_str(&body.body);
+    svg.push_str("</svg>\n");
+    svg
+}
+
+/// Byte offset just past the `>` that closes an element's start tag, ignoring
+/// any `>` inside a quoted attribute value.
+fn end_of_start_tag(tag: &str) -> usize {
+    let mut quote = None;
+    for (offset, character) in tag.char_indices() {
+        match (quote, character) {
+            (None, '"' | '\'') => quote = Some(character),
+            (Some(open), _) if open == character => quote = None,
+            (None, '>') => return offset + 1,
+            _ => {}
+        }
+    }
+    panic!("an element start tag always closes");
+}
+
+/// Parse Piper's `svg-lookup.ini`: one section per device, a `DeviceMatch` list
+/// of `bus:vendor:product` triples, and the drawing that serves them.
+///
+/// The bus is deliberately ignored. A HID++ device reports one product id per
+/// transport it supports, and the same physical mouse is matched by its wired
+/// id over USB and its wireless id through a receiver — both of which the ini
+/// lists under `usb:`, while a Bluetooth-capable model adds a `bluetooth:` id
+/// for the same drawing.
+fn parse_svg_lookup(source: &str) -> Vec<ArtLookup> {
+    let mut entries: Vec<ArtLookup> = Vec::new();
+    for line in source.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some(name) = line
+            .strip_prefix('[')
+            .and_then(|rest| rest.strip_suffix(']'))
+        {
+            entries.push(ArtLookup {
+                name: name.to_owned(),
+                ids: Vec::new(),
+                stem: String::new(),
+            });
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let entry = entries
+            .last_mut()
+            .unwrap_or_else(|| panic!("svg-lookup.ini has `{line}` before any [section]"));
+        match key.trim() {
+            "DeviceMatch" => {
+                for token in value.split(';').map(str::trim).filter(|t| !t.is_empty()) {
+                    let mut parts = token.split(':');
+                    let (Some(_bus), Some(vendor), Some(product), None) =
+                        (parts.next(), parts.next(), parts.next(), parts.next())
+                    else {
+                        panic!("svg-lookup.ini has a malformed DeviceMatch token `{token}`");
+                    };
+                    let ids = (
+                        u16::from_str_radix(vendor, 16),
+                        u16::from_str_radix(product, 16),
+                    );
+                    let (Ok(vendor), Ok(product)) = ids else {
+                        panic!("svg-lookup.ini has a non-hexadecimal id in `{token}`");
+                    };
+                    entry.ids.push((vendor, product));
+                }
+            }
+            "Svg" => {
+                let stem = value
+                    .trim()
+                    .strip_suffix(".svg")
+                    .unwrap_or_else(|| panic!("svg-lookup.ini `Svg={value}` is not an .svg file"));
+                entry.stem.clear();
+                entry.stem.push_str(stem);
+            }
+            _ => {}
+        }
+    }
+    for entry in &entries {
+        assert!(
+            !entry.stem.is_empty(),
+            "svg-lookup.ini section [{}] names no Svg",
+            entry.name
+        );
+        assert!(
+            !entry.ids.is_empty(),
+            "svg-lookup.ini section [{}] matches no device",
+            entry.name
+        );
+    }
+    entries
 }
 
 /// Embed the Windows exe resources — the app icon and a VERSIONINFO block —

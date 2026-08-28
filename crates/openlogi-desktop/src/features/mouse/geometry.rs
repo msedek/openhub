@@ -7,11 +7,42 @@ use openlogi_core::binding::ButtonId;
 
 use super::hotspots::{Hotspot, MOUSE_MODEL_SIZE, MouseControlId};
 use super::leader_lines::{Label, Side};
-use crate::services::assets::{DeviceControl, DeviceLabelSide, ResolvedAsset};
+use crate::services::assets::ResolvedAsset;
 
-/// Approx pixel width of each hotspot hit-target. Logitech only gives us a
-/// marker point per button, not a rectangle, so we size by hand.
+/// Approx pixel width of each hotspot hit-target on a legacy depot asset.
+/// Logitech only gives us a marker point per button, not a rectangle, so we
+/// size by hand.
 const ASSET_HOTSPOT: f32 = 56.;
+
+/// Floor for a hotspot drawn from a device drawing. The drawn rectangle is
+/// used as-is when it is big enough; the thin side buttons on most mice are
+/// only a dozen units wide, which is an unfair click target.
+const MIN_HOTSPOT: f32 = 30.;
+
+/// Which physical control each `buttonN` of a device drawing is.
+///
+/// The drawings number their buttons the way libratbag's driver enumerates the
+/// device, which for a Logitech mouse is the order its `0x1b04` control IDs
+/// come back in: left click, right click, wheel click, then the rear and front
+/// thumb buttons. Those five hold across every Logitech drawing in the set. The
+/// sixth is where a fixed table starts guessing — it is the DPI button under
+/// the wheel on a G703 (verified against the drawing), the sniper button on a
+/// G502, and the thumb wheel on an MX Master — and the seventh onward have no
+/// [`ButtonId`] to carry them at all, so they are measured and embedded but not
+/// surfaced.
+///
+/// The rectangle is right either way; only the name can be. The real fix is not
+/// a longer table: the agent already walks `0x1b04` on every device, and that
+/// walk returns the controls in exactly this order, so a device's own control
+/// list can replace this constant and make `buttonN` an exact key.
+const BUTTON_ORDER: [ButtonId; 6] = [
+    ButtonId::LeftClick,
+    ButtonId::RightClick,
+    ButtonId::MiddleClick,
+    ButtonId::Back,
+    ButtonId::Forward,
+    ButtonId::DpiToggle,
+];
 
 /// Height of a side-label card. The layout needs it to group related cards
 /// without allowing them to overlap at the minimum model height.
@@ -42,6 +73,15 @@ pub enum LabelDistribution {
     reason = "device images are < 4096 px on either axis — well within f32 mantissa"
 )]
 pub fn asset_dimensions_for_png(asset: &ResolvedAsset, target_h: f32, max_w: f32) -> (f32, f32) {
+    if let Some(art) = asset.art {
+        let aspect = art.canvas.width / art.canvas.height;
+        let w = target_h * aspect;
+        return if w > max_w {
+            (max_w, max_w / aspect)
+        } else {
+            (w, target_h)
+        };
+    }
     if asset.png_height == 0 {
         return MOUSE_MODEL_SIZE;
     }
@@ -58,8 +98,11 @@ pub fn asset_dimensions_for_png(asset: &ResolvedAsset, target_h: f32, max_w: f32
 /// model reserves a side gutter for their leader-line labels); keyboards and
 /// other label-less devices don't, so the model can hand them the full width.
 pub fn asset_has_button_labels(asset: &ResolvedAsset) -> bool {
-    if let Some(geometry) = &asset.device_geometry {
-        return !geometry.slots.is_empty();
+    if let Some(art) = asset.art {
+        return art
+            .buttons
+            .iter()
+            .any(|button| control_for(button.index).is_some());
     }
     asset
         .metadata
@@ -93,22 +136,24 @@ pub fn asset_has_button_labels(asset: &ResolvedAsset) -> bool {
     reason = "device images are < 4096 px on either axis — well within f32 mantissa"
 )]
 pub fn asset_hotspots_for_png(asset: &ResolvedAsset, mouse_w: f32, mouse_h: f32) -> Vec<Hotspot> {
-    if let Some(geometry) = &asset.device_geometry {
-        let canvas_w = f32::from(geometry.device.canvas.width);
-        let canvas_h = f32::from(geometry.device.canvas.height);
-        return geometry
-            .slots
+    if let Some(art) = asset.art {
+        let scale_x = mouse_w / art.canvas.width;
+        let scale_y = mouse_h / art.canvas.height;
+        return art
+            .buttons
             .iter()
-            .map(|slot| {
-                let cx = slot.marker.x / canvas_w * mouse_w;
-                let cy = slot.marker.y / canvas_h * mouse_h;
-                Hotspot {
-                    id: map_device_control(slot.control),
-                    x: cx - ASSET_HOTSPOT / 2.,
-                    y: cy - ASSET_HOTSPOT / 2.,
-                    w: ASSET_HOTSPOT,
-                    h: ASSET_HOTSPOT,
-                }
+            .filter_map(|button| {
+                let id = control_for(button.index)?;
+                let (cx, cy) = button.center();
+                let w = (button.width * scale_x).max(MIN_HOTSPOT);
+                let h = (button.height * scale_y).max(MIN_HOTSPOT);
+                Some(Hotspot {
+                    id,
+                    x: cx * scale_x - w / 2.,
+                    y: cy * scale_y - h / 2.,
+                    w,
+                    h,
+                })
             })
             .collect();
     }
@@ -184,45 +229,6 @@ pub fn labels_from_hotspots(
         }
     }
 
-    position_labels(hotspots, mouse_h, &mut labels);
-    labels
-}
-
-/// Lay out labels using explicit sides from OpenHub-authored device geometry.
-///
-/// Narrow layouts still collapse every card to the left; at full width the
-/// author's side is authoritative and only vertical spacing is computed here.
-pub fn asset_labels_from_hotspots(
-    asset: &ResolvedAsset,
-    hotspots: &[Hotspot],
-    mouse_h: f32,
-    distribution: LabelDistribution,
-) -> Vec<Label> {
-    let Some(geometry) = &asset.device_geometry else {
-        return labels_from_hotspots(hotspots, mouse_h, distribution);
-    };
-    let mut labels: Vec<Label> = hotspots
-        .iter()
-        .map(|hotspot| {
-            let side = if distribution == LabelDistribution::LeftOnly {
-                Side::Left
-            } else {
-                geometry
-                    .slots
-                    .iter()
-                    .find(|slot| map_device_control(slot.control) == hotspot.id)
-                    .map_or(Side::Left, |slot| match slot.label_side {
-                        DeviceLabelSide::Left => Side::Left,
-                        DeviceLabelSide::Right => Side::Right,
-                    })
-            };
-            Label {
-                id: hotspot.id,
-                side,
-                y: 0.,
-            }
-        })
-        .collect();
     position_labels(hotspots, mouse_h, &mut labels);
     labels
 }
@@ -310,16 +316,11 @@ fn map_slot_name(name: &str) -> Option<MouseControlId> {
     }
 }
 
-fn map_device_control(control: DeviceControl) -> MouseControlId {
-    let button = match control {
-        DeviceControl::LeftClick => ButtonId::LeftClick,
-        DeviceControl::RightClick => ButtonId::RightClick,
-        DeviceControl::MiddleClick => ButtonId::MiddleClick,
-        DeviceControl::Back => ButtonId::Back,
-        DeviceControl::Forward => ButtonId::Forward,
-        DeviceControl::DpiToggle => ButtonId::DpiToggle,
-    };
-    button.into()
+/// The control a drawing's `buttonN` stands for, or `None` when the index is
+/// past what [`BUTTON_ORDER`] can name.
+fn control_for(index: u32) -> Option<MouseControlId> {
+    let index = usize::try_from(index).ok()?;
+    BUTTON_ORDER.get(index).map(|button| (*button).into())
 }
 
 #[cfg(test)]
@@ -463,38 +464,131 @@ mod tests {
         assert!(labels.iter().any(|label| label.side == Side::Right));
     }
 
+    /// The drawing numbers its buttons; this asserts the numbering lands on
+    /// the physical controls it is supposed to. Left click on the left of the
+    /// top half, right click opposite it, the wheel between them, the two
+    /// thumb buttons down the left flank with the forward one ahead of the
+    /// back one, and DPI behind the wheel on the same centre line.
     #[test]
-    fn local_markers_scale_from_absolute_canvas_coordinates() {
+    fn g703_hotspots_land_on_the_drawn_buttons() {
         let asset = g703_asset();
-        let hotspots = asset_hotspots_for_png(&asset, 160., 280.);
-        let g1 = hotspots
-            .iter()
-            .find(|hotspot| hotspot.id == MouseControlId::Button(ButtonId::LeftClick))
-            .expect("G1 hotspot");
+        let (width, height) = (160., 280.);
+        let hotspots = asset_hotspots_for_png(&asset, width, height);
+        assert_eq!(hotspots.len(), 6, "the G703 drawing names six buttons");
 
-        assert_eq!(g1.center(), (58., 56.));
+        let centre = |button: ButtonId| {
+            hotspots
+                .iter()
+                .find(|hotspot| hotspot.id == MouseControlId::Button(button))
+                .expect("every mapped button has a hotspot")
+                .center()
+        };
+        let left = centre(ButtonId::LeftClick);
+        let right = centre(ButtonId::RightClick);
+        let wheel = centre(ButtonId::MiddleClick);
+        let back = centre(ButtonId::Back);
+        let forward = centre(ButtonId::Forward);
+        let dpi = centre(ButtonId::DpiToggle);
+
+        assert!(
+            left.0 < wheel.0 && wheel.0 < right.0,
+            "wheel between the clicks"
+        );
+        assert!(
+            left.1 < height / 2. && right.1 < height / 2.,
+            "clicks up front"
+        );
+        assert!(
+            back.0 < width / 3. && forward.0 < width / 3.,
+            "both thumb buttons sit on the left flank"
+        );
+        assert!(forward.1 < back.1, "the forward button is the front one");
+        assert!(dpi.1 > wheel.1, "DPI sits behind the wheel");
+        assert!(
+            (dpi.0 - wheel.0).abs() < width * 0.1,
+            "and on the wheel's centre line"
+        );
     }
 
+    /// Hotspots are the drawn rectangles scaled into the rendered image, so a
+    /// button's centre must track its element's centre exactly.
     #[test]
-    fn local_labels_honor_the_authored_gutters() {
+    fn hotspots_scale_from_the_drawing_canvas() {
+        let asset = g703_asset();
+        let art = asset.art.expect("the G703 resolves to a drawing");
+        let (width, height) = (160., 280.);
+        let hotspots = asset_hotspots_for_png(&asset, width, height);
+
+        for button in art.buttons {
+            let Some(id) = control_for(button.index) else {
+                continue;
+            };
+            let hotspot = hotspots
+                .iter()
+                .find(|hotspot| hotspot.id == id)
+                .expect("a mapped button is a hotspot");
+            let (drawn_x, drawn_y) = button.center();
+            let (x, y) = hotspot.center();
+            assert!(
+                (x - drawn_x * width / art.canvas.width).abs() < 0.01,
+                "button {} drifted horizontally: {x}",
+                button.index
+            );
+            assert!(
+                (y - drawn_y * height / art.canvas.height).abs() < 0.01,
+                "button {} drifted vertically: {y}",
+                button.index
+            );
+        }
+    }
+
+    /// A mouse's thumb buttons are drawn as slivers a dozen units wide. They
+    /// still have to be clickable.
+    #[test]
+    fn every_hotspot_is_big_enough_to_click() {
+        let hotspots = asset_hotspots_for_png(&g703_asset(), 160., 280.);
+        for hotspot in &hotspots {
+            assert!(
+                hotspot.w >= MIN_HOTSPOT && hotspot.h >= MIN_HOTSPOT,
+                "{:?} is only {}x{}",
+                hotspot.id,
+                hotspot.w,
+                hotspot.h
+            );
+        }
+    }
+
+    /// Piper draws every G703 callout into the right-hand gutter, which would
+    /// stack all six cards on one side and leave the other empty. Sides come
+    /// from the hotspots' own positions instead: the left flank goes left, the
+    /// wheel side goes right.
+    #[test]
+    fn g703_labels_fill_both_gutters() {
         let asset = g703_asset();
         let hotspots = asset_hotspots_for_png(&asset, 160., 280.);
-        let labels =
-            asset_labels_from_hotspots(&asset, &hotspots, 280., LabelDistribution::BothSides);
+        let labels = labels_from_hotspots(&hotspots, 280., LabelDistribution::BothSides);
 
         for (button, expected_side) in [
             (ButtonId::LeftClick, Side::Left),
-            (ButtonId::RightClick, Side::Right),
-            (ButtonId::MiddleClick, Side::Right),
             (ButtonId::Back, Side::Left),
             (ButtonId::Forward, Side::Left),
+            (ButtonId::RightClick, Side::Right),
+            (ButtonId::MiddleClick, Side::Right),
             (ButtonId::DpiToggle, Side::Right),
         ] {
             let label = labels
                 .iter()
                 .find(|label| label.id == MouseControlId::Button(button))
-                .expect("every G703 slot has a label");
+                .expect("every G703 button has a label");
             assert_eq!(label.side, expected_side, "wrong side for {button:?}");
         }
+    }
+
+    /// The drawing's lit zones stay addressable — the lighting UI tints them.
+    #[test]
+    fn the_g703_keeps_its_two_lit_zones() {
+        let art = g703_asset().art.expect("the G703 resolves to a drawing");
+        assert_eq!(art.leds.len(), 2);
+        assert!(art.leds.iter().all(|led| led.width > 0. && led.height > 0.));
     }
 }

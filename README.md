@@ -9,7 +9,7 @@ Per-game profiles, macros, DPI and lighting for Logitech G gaming mice — no ac
 
 <p align="center">
     <img alt="status" src="https://img.shields.io/badge/status-early%20development-orange?style=flat"/>
-    <img alt="license" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat"/>
+    <img alt="license" src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue?style=flat"/>
     <img alt="platform" src="https://img.shields.io/badge/platform-Linux-informational?style=flat"/>
 </p>
 
@@ -106,23 +106,35 @@ See [NOTICE](NOTICE) for the full attribution.
 
 ## License
 
-Dual-licensed under either of
+**GPL-3.0-or-later.** See [LICENSE](LICENSE).
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
+This is a change from OpenLogi, which is MIT OR Apache-2.0, and it was
+deliberate. OpenHub ships the device illustrations from
+[Piper](https://github.com/libratbag/piper), which are GPL-2.0-or-later.
+Combining copyleft artwork into a distributed work makes the whole work
+copyleft, so the trade was: accurate illustrations of 76 devices, with their
+button anchor points already placed, in exchange for copyleft. For a Linux
+peripheral tool that is good company — libratbag, Piper and Solaar are all GPL.
 
-at your option.
+The inherited OpenLogi code remains available under its own MIT/Apache-2.0
+terms from upstream; see [LICENSE-MIT](LICENSE-MIT) and
+[LICENSE-APACHE](LICENSE-APACHE). Relicensing a combined work does not change
+the licence of anyone else's contribution — it states the terms under which
+this combination is distributed.
 
-**Third-party code.** `crates/openlogi-hidpp` is a vendored fork of
+**Third-party components.** `crates/openlogi-hidpp` is a vendored fork of
 [`hidpp`](https://crates.io/crates/hidpp) by [@lus](https://github.com/lus),
-licensed 0BSD.
+0BSD. The action icons are [Lucide](https://lucide.dev), ISC. The device
+illustrations under [`design/devices/svg/`](design/devices/svg/) are Piper's,
+GPL-2.0-or-later, vendored unmodified — see that directory's README.
 
 **Brand assets.** The OpenHub mark and icons under [`design/`](design/) are
-original work, released under the same MIT/Apache terms as the code, and are
-generated from `tools/brand/generate_assets.py`. The OpenLogi brand assets that
-originally occupied that directory are copyright AprilNEA, all rights reserved,
-and their license withholds permission for forks to use them; every one has been
-replaced. See [`design/LICENSE`](design/LICENSE).
+original work generated from `tools/brand/generate_assets.py`. The OpenLogi
+brand assets that originally occupied that directory are copyright AprilNEA,
+all rights reserved, and their licence withholds permission for forks to use
+them; every one has been replaced.
+
+Full attribution: [NOTICE](NOTICE).
 
 ---
 
