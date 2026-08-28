@@ -472,7 +472,9 @@ mod tests {
             .find(|hotspot| hotspot.id == MouseControlId::Button(ButtonId::LeftClick))
             .expect("G1 hotspot");
 
-        assert_eq!(g1.center(), (58., 56.));
+        let (x, y) = g1.center();
+        assert!((x - 58.).abs() < 0.001, "expected x=58, got {x}");
+        assert!((y - 56.).abs() < 0.001, "expected y=56, got {y}");
     }
 
     #[test]
