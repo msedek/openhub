@@ -1,0 +1,38 @@
+OpenHub
+Copyright © 2026 Miguel Sedek and the OpenHub contributors.
+
+This product includes software developed by the OpenLogi project:
+
+    OpenLogi — a native, local-first alternative to Logitech Options+
+    https://github.com/AprilNEA/OpenLogi
+    Copyright © 2026 AprilNEA and the OpenLogi contributors
+    Licensed under MIT OR Apache-2.0
+
+OpenHub is a hard fork of OpenLogi, taken at commit b32ae087 on 2026-08-27.
+The complete OpenLogi git history is preserved in this repository, so every
+commit retains its original author. The two projects have different goals:
+OpenLogi targets Logitech Options+ and productivity peripherals; OpenHub
+targets Logitech G HUB and gaming peripherals — per-game profiles, macros with
+repeat modes, and the HID++ features that gaming mice expose (0x8100 onboard
+profiles, 0x8110 button spy).
+
+OpenHub is an independent project. It is not endorsed by, affiliated with, or
+supported by the OpenLogi project or its authors. Please do not report OpenHub
+issues to the OpenLogi tracker.
+
+--------------------------------------------------------------------------------
+
+Third-party components inherited from OpenLogi:
+
+    hidpp — https://crates.io/crates/hidpp
+    Copyright © lus
+    Licensed under 0BSD
+    Vendored at crates/openlogi-hidpp.
+
+--------------------------------------------------------------------------------
+
+Trademarks
+
+Not affiliated with Logitech. "Logitech", "G HUB", "Options+", "Lightspeed" and
+"MX Master" are trademarks of Logitech International S.A., used here only to
+describe the hardware and software this project interoperates with.

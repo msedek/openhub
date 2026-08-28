@@ -1,18 +1,28 @@
-OpenLogi Brand Assets — All Rights Reserved
+OpenHub Brand Assets
 
-Copyright © 2026 AprilNEA. All rights reserved.
+Copyright © 2026 Miguel Sedek.
 
-This directory contains the OpenLogi brand assets: the logo, the application
-icon, and related design materials.
+These assets — the OpenHub mark, application icon and installer artwork — are
+original work created for OpenHub and are released under the same terms as the
+source code: MIT OR Apache-2.0, at your option. See LICENSE-MIT and
+LICENSE-APACHE at the repository root.
 
-These assets are NOT covered by the MIT or Apache License 2.0 that apply to the
-OpenLogi source code, and no license to them is granted by those licenses or by
-this file. All rights are reserved by the copyright holder.
+They are provisional: a placeholder identity meant to keep the build and the
+packaging honest until a designed mark replaces them.
 
-You may not copy, modify, distribute, or otherwise use these assets — including
-to identify or represent your own projects, forks, products, or distributions —
-without prior written permission from the copyright holder.
+--------------------------------------------------------------------------------
 
-The only use permitted without prior permission is unaltered reproduction when
-referring to the OpenLogi project itself (for example, linking to it or writing
-about it).
+Note on the upstream brand assets
+
+OpenHub derives from OpenLogi (https://github.com/AprilNEA/OpenLogi). The
+OpenLogi logo, application icon and design materials that originally lived in
+this directory are © 2026 AprilNEA, all rights reserved, and are NOT covered by
+the MIT/Apache licenses that cover the OpenLogi source code. Their license
+explicitly withholds permission to use them to identify or represent forks or
+derived projects.
+
+Every one of those files has been replaced with the original artwork described
+above. No OpenLogi brand asset is distributed by this repository. They remain
+present in the imported git history, which is preserved for authorship and
+license-compliance reasons; they are not used, shipped, or displayed by any
+build produced from this tree.
