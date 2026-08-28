@@ -24,6 +24,9 @@ name = "hidpp"
 
 [dependencies]
 openlogi-device-registry = { workspace = true }
+# The pure `0x8100` decoders. The dependency only goes this way: see that
+# crate's manifest for why adding `hidpp` there would be a cycle.
+ghub-hidpp-gaming = { workspace = true }
 thiserror = { workspace = true }
 hidreport = "0.5.0"
 futures = "0.3.31"

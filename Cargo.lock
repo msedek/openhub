@@ -5624,6 +5624,7 @@ dependencies = [
  "derive_more",
  "futures",
  "futures-timer",
+ "ghub-hidpp-gaming",
  "hex",
  "hidreport",
  "num_enum",
