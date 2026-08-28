@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result};
 use clap::Args;
-use ghub_models::{DeviceModel, model_for_hidpp_id, model_for_usb_id};
+use ghub_models::model_for_product_ids;
 use openlogi_hid::{DeviceMode, WriteError};
 
 use crate::cmd::diag::select_device_with_product_ids;
@@ -90,17 +90,6 @@ fn describe_mode(mode: Option<DeviceMode>) -> &'static str {
     }
 }
 
-/// Find the first of `product_ids` the model table recognises.
-///
-/// A device reports several: its wireless WPID through the receiver and the
-/// per-transport PIDs from HID++ `0x0003`. Either kind may be the one the
-/// table was written against, so both lookups are tried for each.
-fn resolve_model(product_ids: &[u16]) -> Option<&'static DeviceModel> {
-    product_ids
-        .iter()
-        .find_map(|id| model_for_hidpp_id(*id).or_else(|| model_for_usb_id(*id)))
-}
-
 /// Compare what the device said against what the model table claims for it.
 ///
 /// A disagreement means the table is wrong — the device is the authority — and
@@ -113,7 +102,7 @@ fn print_model_cross_check(product_ids: &[u16], button_count: u8, profile_count:
         .join(", ");
     println!("  reported product ids: [{ids}]");
 
-    let Some(model) = resolve_model(product_ids) else {
+    let Some(model) = model_for_product_ids(product_ids) else {
         println!("  model table:          no entry matches any of those ids");
         return;
     };
@@ -141,41 +130,5 @@ fn print_model_cross_check(product_ids: &[u16], button_count: u8, profile_count:
              the device is right, {CATALOG_PATH} needs fixing",
             model.onboard_profile_count
         );
-    }
-}
-
-#[cfg(test)]
-mod resolve_model_tests {
-    use super::resolve_model;
-
-    #[test]
-    fn resolves_the_g703_from_its_wireless_wpid() {
-        let model = resolve_model(&[0x4086]).expect("the G703 is in the table");
-
-        assert_eq!(model.id, "g703_hero");
-    }
-
-    #[test]
-    fn resolves_the_g703_from_its_wired_product_id() {
-        // Plugging the cable in changes which id the device reports; it must
-        // still resolve to the same model, or the cross-check would silently
-        // stop running.
-        let model = resolve_model(&[0xc090]).expect("the G703 is in the table");
-
-        assert_eq!(model.id, "g703_hero");
-    }
-
-    #[test]
-    fn skips_ids_the_table_does_not_know() {
-        // A device reports several ids and only one of them is the model's.
-        let model = resolve_model(&[0xffff, 0x4086]).expect("the G703 is in the table");
-
-        assert_eq!(model.id, "g703_hero");
-    }
-
-    #[test]
-    fn an_entirely_unknown_device_resolves_to_nothing() {
-        assert!(resolve_model(&[0xffff]).is_none());
-        assert!(resolve_model(&[]).is_none());
     }
 }

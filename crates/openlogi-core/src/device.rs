@@ -100,7 +100,9 @@ impl DeviceKind {
     reason = "capabilities is a serialized feature-bit DTO; independent booleans keep the IPC/config shape explicit"
 )]
 pub struct Capabilities {
-    /// Reprogrammable buttons — HID++ `0x1b00`–`0x1b04` (ReprogControls).
+    /// Remappable buttons: either HID++ `0x1b00`–`0x1b04` (ReprogControls), or
+    /// `0x8100` (OnboardProfiles) on a device the model table knows. See
+    /// [`Capabilities::has_buttons`] for why the second needs the table.
     pub buttons: bool,
     /// Adjustable pointer resolution — HID++ `0x2201` / `0x2202` (AdjustableDpi).
     pub pointer: bool,
@@ -133,9 +135,23 @@ pub struct Capabilities {
 impl Capabilities {
     /// Derive capabilities from the set of HID++ feature IDs a device reports.
     /// Membership of a driving feature ID flips the corresponding flag.
+    ///
+    /// Product ids are not known here, so a gaming device is *not* credited
+    /// with buttons — see [`Capabilities::from_feature_and_product_ids`] for
+    /// the derivation that has them.
     #[must_use]
     pub fn from_feature_ids(ids: &[u16]) -> Self {
-        const BUTTONS: [u16; 5] = [0x1b00, 0x1b01, 0x1b02, 0x1b03, 0x1b04];
+        Self::from_feature_and_product_ids(ids, &[])
+    }
+
+    /// [`Capabilities::from_feature_ids`], plus every product id the device
+    /// reports for itself — its wireless WPID and the per-transport PIDs from
+    /// HID++ `0x0003`.
+    ///
+    /// Only [`Capabilities::has_buttons`] reads them; every other flag is a
+    /// feature-table membership test and ignores them.
+    #[must_use]
+    pub fn from_feature_and_product_ids(feature_ids: &[u16], product_ids: &[u16]) -> Self {
         const POINTER: [u16; 2] = [0x2201, 0x2202];
         // ColorLedEffects (0x8070), PerKeyLighting2 (0x8081) and PerKeyLighting
         // (0x8080) — all three driven by `set_keyboard_color`, which prefers
@@ -143,17 +159,47 @@ impl Capabilities {
         // back through 0x8081 to 0x8080. Other families (backlight 0x198x) stay
         // out so they don't earn a tab the panel can't drive.
         const LIGHTING: [u16; 3] = [0x8080, 0x8070, 0x8081];
-        let has = |family: &[u16]| ids.iter().any(|id| family.contains(id));
+        let has = |family: &[u16]| feature_ids.iter().any(|id| family.contains(id));
         Self {
-            buttons: has(&BUTTONS),
+            buttons: Self::has_buttons(feature_ids, product_ids),
             pointer: has(&POINTER),
             lighting: has(&LIGHTING),
             scroll_inversion: false,
-            hires_wheel: ids.contains(&0x2121),
-            thumbwheel: ids.contains(&0x2150),
-            haptic_feedback: ids.contains(&0x19b0),
+            hires_wheel: feature_ids.contains(&0x2121),
+            thumbwheel: feature_ids.contains(&0x2150),
+            haptic_feedback: feature_ids.contains(&0x19b0),
             haptic_panel: false,
         }
+    }
+
+    /// Whether a device has buttons this build can present to the user.
+    ///
+    /// Two ways to earn it, and the second is why this is a function rather
+    /// than a membership test:
+    ///
+    /// - **ReprogControls (`0x1b00`–`0x1b04`).** The device enumerates its own
+    ///   controls, so the feature alone is enough — whatever the device is, it
+    ///   will name its buttons when asked.
+    /// - **OnboardProfiles (`0x8100`) on a model in the table.** Gaming mice do
+    ///   not implement ReprogControls at all; their buttons live in onboard
+    ///   profiles, which say *how many* buttons exist but never what or where
+    ///   they are. The names, positions and evdev codes come from
+    ///   [`ghub_models`], so a device the table does not list reports no
+    ///   buttons even though it has them: claiming buttons that cannot be named
+    ///   would only move the failure into the GUI. Adding the model to
+    ///   `crates/ghub-models/src/catalog.rs` is what fixes that.
+    #[must_use]
+    pub fn has_buttons(feature_ids: &[u16], product_ids: &[u16]) -> bool {
+        /// ReprogControls, every version of it.
+        const REPROG_CONTROLS: [u16; 5] = [0x1b00, 0x1b01, 0x1b02, 0x1b03, 0x1b04];
+        /// OnboardProfiles.
+        const ONBOARD_PROFILES: u16 = 0x8100;
+
+        if feature_ids.iter().any(|id| REPROG_CONTROLS.contains(id)) {
+            return true;
+        }
+        feature_ids.contains(&ONBOARD_PROFILES)
+            && ghub_models::model_for_product_ids(product_ids).is_some()
     }
 
     /// Best-effort capabilities for a device we could not probe (offline /
@@ -571,6 +617,61 @@ mod tests {
             Capabilities::from_feature_ids(&[0x0000, 0x0003]),
             Capabilities::default()
         );
+    }
+
+    /// The G703's real ids, so a change to the model table that dropped it
+    /// would fail here instead of silently emptying the button screen.
+    const G703_PRODUCT_IDS: [u16; 2] = [0x4086, 0xc090];
+
+    #[test]
+    fn reprog_controls_alone_still_earns_buttons() {
+        // Productivity mice never report a product id the model table knows,
+        // and must not need to: 0x1b04 enumerates its own controls.
+        assert!(Capabilities::has_buttons(&[0x0003, 0x1b04], &[]));
+        assert!(Capabilities::has_buttons(&[0x0003, 0x1b04], &[0xffff]));
+        assert!(Capabilities::from_feature_ids(&[0x0003, 0x1b04]).buttons);
+    }
+
+    #[test]
+    fn onboard_profiles_on_a_known_model_earns_buttons() {
+        // A G703: 0x8100 and no ReprogControls anywhere in its table.
+        assert!(Capabilities::has_buttons(
+            &[0x0003, 0x2201, 0x8100],
+            &G703_PRODUCT_IDS
+        ));
+        assert!(
+            Capabilities::from_feature_and_product_ids(
+                &[0x0003, 0x2201, 0x8100],
+                &G703_PRODUCT_IDS
+            )
+            .buttons
+        );
+    }
+
+    #[test]
+    fn onboard_profiles_on_an_unknown_model_earns_nothing() {
+        // 0x8100 says how many buttons exist, never which ones. Without a
+        // slot table there is nothing to name, so the honest answer is "no
+        // buttons" — better a missing screen than an empty one.
+        assert!(!Capabilities::has_buttons(
+            &[0x0003, 0x2201, 0x8100],
+            &[0xffff]
+        ));
+        assert!(!Capabilities::has_buttons(&[0x0003, 0x2201, 0x8100], &[]));
+        assert!(
+            !Capabilities::from_feature_and_product_ids(&[0x0003, 0x2201, 0x8100], &[0xffff])
+                .buttons
+        );
+    }
+
+    #[test]
+    fn a_known_model_without_onboard_profiles_earns_nothing() {
+        // Being in the table is not itself a capability: the device still has
+        // to answer for the feature that carries its buttons.
+        assert!(!Capabilities::has_buttons(
+            &[0x0003, 0x2201],
+            &G703_PRODUCT_IDS
+        ));
     }
 
     #[test]

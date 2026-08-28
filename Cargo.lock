@@ -5513,6 +5513,7 @@ dependencies = [
  "az",
  "etcetera",
  "fluent-langneg",
+ "ghub-models",
  "num_enum",
  "nutype",
  "openlogi-device-registry",

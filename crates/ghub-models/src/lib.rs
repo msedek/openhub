@@ -13,5 +13,7 @@
 mod catalog;
 mod slot;
 
-pub use catalog::{DeviceModel, G703_HERO, MODELS, model_for_hidpp_id, model_for_usb_id};
+pub use catalog::{
+    DeviceModel, G703_HERO, MODELS, model_for_hidpp_id, model_for_product_ids, model_for_usb_id,
+};
 pub use slot::{ButtonSlot, SlotId, codes};

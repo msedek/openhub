@@ -97,9 +97,28 @@ pub fn model_for_usb_id(product_id: u16) -> Option<&'static DeviceModel> {
         .find(|m| m.usb_product_id == product_id)
 }
 
+/// Finds the model matching any of the product ids a device reports for itself.
+///
+/// A device reports several: its wireless WPID through the receiver and the
+/// per-transport PIDs from HID++ `0x0003`. Either kind may be the one the
+/// table was written against — the G703 answers `0x4086` wireless and `0xc090`
+/// wired, and which one arrives first depends on the transport — so both
+/// lookups are tried for every id, in the order given.
+///
+/// This is the one place that turns "what a device calls itself" into a table
+/// entry. Callers that need the same answer (the capability probe, the
+/// `diag onboard` cross-check) share it rather than each keeping their own
+/// loop, because two copies of this rule would eventually disagree.
+#[must_use]
+pub fn model_for_product_ids(product_ids: &[u16]) -> Option<&'static DeviceModel> {
+    product_ids
+        .iter()
+        .find_map(|id| model_for_hidpp_id(*id).or_else(|| model_for_usb_id(*id)))
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{SlotId, model_for_hidpp_id, model_for_usb_id};
+    use crate::{SlotId, model_for_hidpp_id, model_for_product_ids, model_for_usb_id};
 
     /// The G703 reaches the host two ways: `4086` is its wireless WPID through
     /// the Lightspeed receiver, `c090` its USB product id on the cable. Both
@@ -132,6 +151,30 @@ mod tests {
                 (SlotId::G6, 279), // BTN_TASK, behind the wheel
             ]
         );
+    }
+
+    /// A device hands over a list of ids and only one of them is the model's;
+    /// the unknown ones must be stepped over rather than ending the search.
+    #[test]
+    fn a_list_of_ids_resolves_on_the_one_the_table_knows() {
+        assert_eq!(
+            model_for_product_ids(&[0xffff, 0x4086])
+                .expect("the G703 is in the table")
+                .id,
+            "g703_hero"
+        );
+        assert_eq!(
+            model_for_product_ids(&[0xc090])
+                .expect("the G703 is in the table")
+                .id,
+            "g703_hero"
+        );
+    }
+
+    #[test]
+    fn an_entirely_unknown_device_resolves_to_nothing() {
+        assert!(model_for_product_ids(&[0xffff]).is_none());
+        assert!(model_for_product_ids(&[]).is_none());
     }
 
     #[test]
