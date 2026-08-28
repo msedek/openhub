@@ -7,8 +7,13 @@
 //! Decoding lives in [`ghub_hidpp_gaming::onboard_profiles`] so it can be
 //! tested without a device; this file is only the transport.
 
-use ghub_hidpp_gaming::onboard_profiles::{DeviceMode, OnboardProfilesInfo, parse_info};
+use ghub_hidpp_gaming::onboard_profiles::parse_info;
 use openlogi_hidpp_derive::Feature;
+
+// The decoded types this feature returns. Re-exported here so a consumer
+// that already depends on `hidpp` reads them from the feature that
+// produces them, instead of taking a second dependency on the parser crate.
+pub use ghub_hidpp_gaming::onboard_profiles::{DeviceMode, OnboardProfilesInfo};
 
 use crate::{feature::FeatureEndpoint, protocol::v20::Hidpp20Error};
 

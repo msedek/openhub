@@ -5492,6 +5492,7 @@ version = "0.8.1"
 dependencies = [
  "anyhow",
  "clap",
+ "ghub-models",
  "openlogi-assets",
  "openlogi-camera",
  "openlogi-core",

@@ -15,6 +15,7 @@ pub mod controls;
 pub mod dpi;
 pub mod features;
 pub mod lighting;
+pub mod onboard;
 pub mod smartshift;
 pub mod wheel;
 
@@ -34,6 +35,8 @@ pub enum DiagCmd {
     Lighting(lighting::LightingArgs),
     /// Read or set the HID++ 0x2121 wheel reporting resolution.
     Wheel(wheel::WheelArgs),
+    /// Read HID++ 0x8100 onboard-profile state from the active device.
+    Onboard(onboard::OnboardArgs),
 }
 
 impl DiagCmd {
@@ -46,6 +49,7 @@ impl DiagCmd {
             Self::Smartshift(args) => smartshift::run(args).await,
             Self::Lighting(args) => lighting::run(args).await,
             Self::Wheel(args) => wheel::run(args).await,
+            Self::Onboard(args) => onboard::run(args).await,
         }
     }
 }
@@ -56,6 +60,11 @@ impl DiagCmd {
 struct Candidate {
     route: DeviceRoute,
     name: String,
+    /// Every product id the device reports for itself: its wireless WPID plus
+    /// the per-transport PIDs from HID++ `0x0003`. Carried so a diag can look
+    /// the device up in a model table without re-enumerating; empty when the
+    /// device did not answer either.
+    product_ids: Vec<u16>,
 }
 
 /// Enumerate inventories and resolve every *online* paired device to a route.
@@ -73,7 +82,16 @@ async fn online_devices() -> Result<Vec<Candidate>> {
                 .codename
                 .clone()
                 .unwrap_or_else(|| format!("Slot {}", paired.slot));
-            out.push(Candidate { route, name });
+            let mut product_ids: Vec<u16> = paired.wpid.into_iter().collect();
+            if let Some(model_info) = &paired.model_info {
+                product_ids.extend(model_info.model_ids.iter().copied().filter(|id| *id != 0));
+            }
+            product_ids.dedup();
+            out.push(Candidate {
+                route,
+                name,
+                product_ids,
+            });
         }
     }
     Ok(out)
@@ -113,23 +131,42 @@ pub(crate) async fn select_device(
     query: Option<&str>,
     required_features: &[u16],
 ) -> Result<(DeviceRoute, String)> {
-    let devices = online_devices().await?;
+    let candidate = pick_device(query, required_features).await?;
+    Ok((candidate.route, candidate.name))
+}
+
+/// [`select_device`], plus the product ids the chosen device reports for
+/// itself, for a diag that cross-checks the device against a model table.
+pub(crate) async fn select_device_with_product_ids(
+    query: Option<&str>,
+    required_features: &[u16],
+) -> Result<(DeviceRoute, String, Vec<u16>)> {
+    let candidate = pick_device(query, required_features).await?;
+    Ok((candidate.route, candidate.name, candidate.product_ids))
+}
+
+async fn pick_device(query: Option<&str>, required_features: &[u16]) -> Result<Candidate> {
+    let mut devices = online_devices().await?;
 
     if let Some(q) = query {
         let needle = q.to_lowercase();
-        return devices
+        return match devices
             .iter()
-            .find(|c| c.name.to_lowercase().contains(&needle))
-            .map(|c| (c.route.clone(), c.name.clone()))
-            .ok_or_else(|| no_match_err(&devices, query));
+            .position(|c| c.name.to_lowercase().contains(&needle))
+        {
+            Some(index) => Ok(devices.swap_remove(index)),
+            None => Err(no_match_err(&devices, query)),
+        };
     }
 
     if !required_features.is_empty() {
-        for c in &devices {
+        let mut matched = None;
+        for (index, c) in devices.iter().enumerate() {
             match dump_features(&c.route).await {
                 Ok(entries) => {
                     if entries.iter().any(|e| required_features.contains(&e.id)) {
-                        return Ok((c.route.clone(), c.name.clone()));
+                        matched = Some(index);
+                        break;
                     }
                 }
                 Err(e) => {
@@ -143,16 +180,18 @@ pub(crate) async fn select_device(
                 }
             }
         }
+        if let Some(index) = matched {
+            return Ok(devices.swap_remove(index));
+        }
         // None advertised the feature — fall through to first-online so the
         // caller's own "device does not expose feature 0x….." error still
         // fires against a concrete device.
     }
 
-    devices
-        .into_iter()
-        .next()
-        .map(|c| (c.route, c.name))
-        .ok_or_else(|| no_match_err(&[], None))
+    if devices.is_empty() {
+        return Err(no_match_err(&[], None));
+    }
+    Ok(devices.swap_remove(0))
 }
 
 #[cfg(test)]
@@ -168,6 +207,7 @@ mod no_match_err_tests {
                 product_id: 0xc539,
             },
             name: name.to_string(),
+            product_ids: Vec::new(),
         }
     }
 
