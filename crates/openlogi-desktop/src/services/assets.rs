@@ -801,11 +801,11 @@ mod tests {
 
         assert_eq!(asset.depot, "g703_hero");
         assert_eq!(
-            asset.image_resource,
+            asset.image_resource.as_deref(),
             Some("device-assets/g703_hero/device-320.png")
         );
         assert_eq!(
-            asset.hero_image_resource,
+            asset.hero_image_resource.as_deref(),
             Some("device-assets/g703_hero/device-120.png")
         );
         let geometry = asset
