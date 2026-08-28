@@ -10,6 +10,9 @@
 
 #![forbid(unsafe_code)]
 
+mod executor;
 mod model;
+mod timer;
 
+pub use executor::{Executor, RunHandle, Sink};
 pub use model::{Macro, MacroId, RepeatMode, Step};

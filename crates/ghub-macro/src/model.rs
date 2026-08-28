@@ -51,13 +51,16 @@ pub enum RepeatMode {
     /// Repeat the sequence every `interval_ms` for as long as the button is
     /// held. This is the mode every one of the owner's nine real macros uses.
     WhileHeld {
-        /// Delay between the end of one run and the start of the next.
+        /// Period between the *start* of one run and the start of the next,
+        /// measured from a fixed clock — not a pause added after each run, or
+        /// the cost of a run would accumulate as drift.
         interval_ms: u32,
     },
     /// Repeat the sequence every `interval_ms`, started by one press and
     /// stopped by the next.
     Toggle {
-        /// Delay between the end of one run and the start of the next.
+        /// Period between the start of one run and the start of the next, as
+        /// in [`RepeatMode::WhileHeld`].
         interval_ms: u32,
     },
 }
