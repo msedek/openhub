@@ -1,12 +1,17 @@
 // OpenLogi Frontmost Window — GNOME Shell extension.
 //
-// Exports a tiny D-Bus service that returns the WM_CLASS of the currently
-// focused window. OpenLogi's `gnome_shell` frontmost backend polls this to
-// drive per-app mouse-profile switching on GNOME Wayland, where the focused
-// window is otherwise not visible to ordinary clients.
+// Exports a tiny D-Bus service that returns the WM_CLASS, title and client
+// pid of the currently focused window. OpenLogi's `gnome_shell` frontmost
+// backend polls this to drive per-app mouse-profile switching on GNOME
+// Wayland, where the focused window is otherwise not visible to ordinary
+// clients.
 //
-// It reads only `global.display.focus_window.get_wm_class()` — no titles, no
-// window contents, no input. ESM module style; targets GNOME Shell 45+.
+// Since v2 it also reads the window title and pid: some launchers (Steam
+// chief among them) hide the real game behind a generic WM_CLASS, so a
+// per-game profile needs the title and the pid — which feeds a Steam AppID
+// lookup — as a fallback. It reads only `global.display.focus_window`'s
+// WM_CLASS, title and pid — no window contents, no input. ESM module style;
+// targets GNOME Shell 45+.
 
 import Gio from 'gi://Gio';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -18,6 +23,11 @@ const DBUS_INTERFACE = `
   <interface name="org.openlogi.Frontmost">
     <method name="GetFocusedWmClass">
       <arg type="s" direction="out" name="wmClass"/>
+    </method>
+    <method name="GetFocusedWindow">
+      <arg type="s" direction="out" name="wmClass"/>
+      <arg type="s" direction="out" name="title"/>
+      <arg type="u" direction="out" name="pid"/>
     </method>
   </interface>
 </node>`;
@@ -51,5 +61,18 @@ export default class OpenLogiFrontmostExtension extends Extension {
         if (!win)
             return '';
         return win.get_wm_class() || '';
+    }
+
+    // D-Bus method org.openlogi.Frontmost.GetFocusedWindow.
+    GetFocusedWindow() {
+        return this._describe(global.display.focus_window);
+    }
+
+    // [wmClass, title, pid] for a Meta.Window, or the empty triple.
+    _describe(win) {
+        if (!win)
+            return ['', '', 0];
+        const pid = win.get_pid();
+        return [win.get_wm_class() || '', win.get_title() || '', pid > 0 ? pid : 0];
     }
 }

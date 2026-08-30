@@ -16,6 +16,7 @@
 //! Only the session-bus connection is held in the backend; a lightweight proxy
 //! is built per poll (no extra D-Bus traffic beyond the method call itself).
 
+use std::sync::Once;
 use std::time::Duration;
 
 use tracing::debug;
@@ -24,6 +25,7 @@ use zbus::blocking::connection::Builder;
 use zbus::proxy;
 
 use super::FrontmostSource;
+use crate::{FocusedWindow, ForegroundApp};
 
 /// Cap on every D-Bus call to the extension. Without it, a stalled GNOME Shell
 /// would block the polling thread forever (the probe runs inside the
@@ -43,12 +45,36 @@ trait Frontmost {
     /// WM_CLASS of the focused window, or "" when nothing is focused.
     #[zbus(name = "GetFocusedWmClass")]
     fn get_focused_wm_class(&self) -> zbus::Result<String>;
+
+    /// WM_CLASS, title and client pid of the focused window; empty strings and
+    /// `0` when nothing is focused. Extension v2 only.
+    #[zbus(name = "GetFocusedWindow")]
+    fn get_focused_window(&self) -> zbus::Result<(String, String, u32)>;
+}
+
+/// Map a `(wm_class, title, pid)` triple from the extension's
+/// `GetFocusedWindow` (or a synthesized one, for the `GetFocusedWmClass`
+/// fallback) into a [`FocusedWindow`]. An empty `wm_class` means nothing is
+/// focused.
+fn describe(wm_class: String, title: String, pid: u32) -> Option<FocusedWindow> {
+    if wm_class.is_empty() {
+        return None;
+    }
+    Some(FocusedWindow {
+        app: ForegroundApp::unnamed(wm_class),
+        title: (!title.is_empty()).then_some(title),
+        pid: (pid != 0).then_some(pid),
+        steam_app_id: None,
+    })
 }
 
 /// Frontmost backend talking to the OpenLogi GNOME Shell extension over the
 /// session bus.
 struct GnomeShellSource {
     conn: Connection,
+    /// Logs the "extension is v1" `debug!` at most once per connection, so a
+    /// v1 extension doesn't spam a log line on every ~1 Hz poll.
+    logged_v1_fallback: Once,
 }
 
 impl GnomeShellSource {
@@ -70,7 +96,10 @@ impl GnomeShellSource {
             .get_focused_wm_class()
             .map_err(|e| debug!("gnome-shell: OpenLogi extension not reachable: {e}"))
             .ok()?;
-        Some(Self { conn })
+        Some(Self {
+            conn,
+            logged_v1_fallback: Once::new(),
+        })
     }
 }
 
@@ -84,6 +113,25 @@ impl FrontmostSource for GnomeShellSource {
             .map_err(|e| debug!("gnome-shell: poll failed (extension gone or bus down?): {e}"))
             .ok()?;
         (!wm_class.is_empty()).then_some(wm_class)
+    }
+
+    fn focused_window(&self) -> Option<FocusedWindow> {
+        let proxy = FrontmostProxy::new(&self.conn)
+            .map_err(|e| debug!("gnome-shell: proxy build failed: {e}"))
+            .ok()?;
+        match proxy.get_focused_window() {
+            Ok((wm_class, title, pid)) => describe(wm_class, title, pid),
+            Err(e) => {
+                self.logged_v1_fallback.call_once(|| {
+                    debug!(
+                        "gnome-shell: GetFocusedWindow unavailable ({e}), extension is v1 — \
+                         falling back to GetFocusedWmClass (no title/pid)"
+                    );
+                });
+                self.frontmost_app_id()
+                    .map(|id| FocusedWindow::app(ForegroundApp::unnamed(id)))
+            }
+        }
     }
 
     fn name(&self) -> &'static str {

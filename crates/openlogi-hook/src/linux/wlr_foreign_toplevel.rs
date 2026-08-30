@@ -61,6 +61,7 @@ use wayland_protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_m
 };
 
 use super::FrontmostSource;
+use crate::{FocusedWindow, ForegroundApp};
 
 /// Highest protocol version this backend understands. The events it relies on
 /// (`app_id`, `state`, `done`, `closed`) exist since v1, so binding is capped
@@ -82,8 +83,10 @@ const POLL_CAP_MS: u64 = 25;
 #[derive(Default)]
 struct Toplevel {
     app_id: Option<String>,
+    title: Option<String>,
     activated: bool,
     pending_app_id: Option<String>,
+    pending_title: Option<String>,
     pending_activated: bool,
 }
 
@@ -176,6 +179,11 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for State {
                     toplevel.pending_app_id = Some(app_id);
                 }
             }
+            Event::Title { title } => {
+                if let Some(toplevel) = state.toplevels.get_mut(&id) {
+                    toplevel.pending_title = Some(title);
+                }
+            }
             Event::State { state: states } => {
                 let activated = is_activated(&states);
                 if let Some(toplevel) = state.toplevels.get_mut(&id) {
@@ -193,6 +201,9 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for State {
                     if toplevel.pending_app_id.is_some() {
                         toplevel.app_id = toplevel.pending_app_id.clone();
                     }
+                    if toplevel.pending_title.is_some() {
+                        toplevel.title = toplevel.pending_title.clone();
+                    }
                     toplevel.activated = toplevel.pending_activated;
                 }
             }
@@ -200,7 +211,7 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for State {
                 state.toplevels.remove(&id);
                 handle.destroy();
             }
-            // Title, output enter/leave, and parent are not needed for frontmost.
+            // Output enter/leave and parent are not needed for frontmost.
             _ => {}
         }
     }
@@ -429,14 +440,15 @@ impl WlrForeignToplevelSource {
             session: Mutex::new(Some(s)),
         })
     }
-}
 
-impl FrontmostSource for WlrForeignToplevelSource {
-    fn frontmost_app_id(&self) -> Option<String> {
+    /// Reconnect the session when the compositor sent `Finished` (compositor
+    /// reload / restart) or a prior reconnect attempt failed, then drain
+    /// pending events. Returns the locked, up-to-date session guard, or
+    /// `None` when no session is usable — a fresh reconnect attempt failed,
+    /// or `Finished` arrived during this drain (the next call retries).
+    fn synced_session(&self) -> Option<std::sync::MutexGuard<'_, Option<Session>>> {
         let mut guard = self.session.lock().ok()?;
 
-        // Reconnect when the compositor sent `Finished` (compositor reload /
-        // restart) or when a prior reconnect attempt failed.
         let needs_reconnect = guard.as_ref().is_none_or(|s| s.state.finished);
         if needs_reconnect {
             *guard = Session::open();
@@ -450,15 +462,36 @@ impl FrontmostSource for WlrForeignToplevelSource {
         let Session { queue, state, .. } = guard.as_mut()?;
         drain_events(queue, state);
         if state.finished {
-            // `Finished` arrived during this drain; reconnect on the next call.
             return None;
         }
 
+        Some(guard)
+    }
+}
+
+impl FrontmostSource for WlrForeignToplevelSource {
+    fn frontmost_app_id(&self) -> Option<String> {
+        let guard = self.synced_session()?;
+        let state = &guard.as_ref()?.state;
         state
             .toplevels
             .values()
             .find(|toplevel| toplevel.activated)
             .and_then(|toplevel| toplevel.app_id.clone())
+    }
+
+    fn focused_window(&self) -> Option<FocusedWindow> {
+        let guard = self.synced_session()?;
+        let state = &guard.as_ref()?.state;
+        // The protocol has no client pid, so `pid`/`steam_app_id` stay `None`
+        // here; `with_steam_app_id` in `linux.rs` cannot fill them in either.
+        let toplevel = state.toplevels.values().find(|t| t.activated)?;
+        Some(FocusedWindow {
+            app: ForegroundApp::unnamed(toplevel.app_id.clone()?),
+            title: toplevel.title.clone(),
+            pid: None,
+            steam_app_id: None,
+        })
     }
 
     fn name(&self) -> &'static str {

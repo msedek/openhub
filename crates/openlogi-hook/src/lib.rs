@@ -27,7 +27,7 @@
 
 use std::cfg_select;
 
-pub use openlogi_core::app::ForegroundApp;
+pub use openlogi_core::app::{FocusedWindow, ForegroundApp};
 pub use openlogi_core::binding::ButtonId;
 pub use openlogi_core::scroll::ScrollDelta;
 
@@ -357,6 +357,14 @@ trait HookBackend {
         None
     }
 
+    /// See [`crate::focused_window`]. The default wraps [`Self::frontmost_app`],
+    /// so a platform that only reports the application gets a `FocusedWindow`
+    /// with every other field `None` for free; Linux overrides this to fill in
+    /// the title, pid, and Steam AppID its focus sources can read.
+    fn focused_window() -> Option<FocusedWindow> {
+        Self::frontmost_app().map(FocusedWindow::app)
+    }
+
     /// See [`crate::cursor_position`].
     fn cursor_position() -> Option<CursorPosition> {
         None
@@ -511,6 +519,21 @@ impl Hook {
 #[must_use]
 pub fn frontmost_application() -> Option<ForegroundApp> {
     Backend::frontmost_app()
+}
+
+/// Return everything the platform can read about the currently focused window.
+///
+/// [`FocusedWindow::app`] is exactly [`frontmost_application`]'s result. The
+/// extra fields — title, pid, Steam AppID — are the fallback chain a per-game
+/// profile uses when a launcher hides the real `WM_CLASS`: on Linux, X11 and
+/// the GNOME Shell extension report the title and pid, wlroots reports the
+/// title, and the pid (when known) is used to read `SteamAppId` out of
+/// `/proc/<pid>/environ`. macOS and Windows report the application alone.
+///
+/// `None` under the same conditions as [`frontmost_application`].
+#[must_use]
+pub fn focused_window() -> Option<FocusedWindow> {
+    Backend::focused_window()
 }
 
 /// Return the current global cursor position without installing an input hook.
