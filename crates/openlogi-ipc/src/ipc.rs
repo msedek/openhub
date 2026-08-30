@@ -62,6 +62,7 @@ pub use succession::Identity;
 /// v28: `Action::HoldShortcut` appended for lifecycle-held keyboard output.
 /// v29: `Agent::declare_client` + [`ClientKind`] appended — typed demand for
 ///      the macOS dormancy gate.
+/// v30: `Action::RunMacro` appended for macro playback.
 /// v31: `Action::GShift` appended — the per-game profile layer trigger.
 /// v32: `AgentSnapshot::active_profile` appended — the per-game profile the
 ///      agent applied.
