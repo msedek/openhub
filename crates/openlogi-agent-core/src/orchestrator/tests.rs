@@ -880,6 +880,17 @@ fn published_back_binding(orch: &Orchestrator) -> Option<Action> {
     })
 }
 
+/// The published hook maps' G-Shift entry for `button`, if any. Unlike
+/// `published_back_binding` this reads the map the OS input hook itself
+/// consults, which is the only seam a profile's shifted layer travels.
+fn published_g_shift_binding(orch: &Orchestrator, button: ButtonId) -> Option<Action> {
+    orch.shared
+        .hook_maps
+        .read()
+        .ok()
+        .and_then(|maps| maps.g_shift.get(&button).map(Binding::click_action))
+}
+
 #[test]
 fn app_switch_republishes_capture_plans() {
     // HID++ dispatch reads `plan.bindings` at event time, so a
@@ -920,6 +931,10 @@ fn lost_ark_config() -> Config {
         .assignments
         .normal
         .insert(ButtonId::Back, Action::RunMacro(MacroId("hyper".into())));
+    profile.assignments.g_shift.insert(
+        ButtonId::RightClick,
+        Action::RunMacro(MacroId("superright".into())),
+    );
     config
         .profiles
         .insert(ProfileId("lost-ark".into()), profile);
@@ -938,6 +953,10 @@ fn hyper() -> Action {
     Action::RunMacro(MacroId("hyper".into()))
 }
 
+fn superright() -> Action {
+    Action::RunMacro(MacroId("superright".into()))
+}
+
 #[test]
 fn an_unknown_focus_keeps_the_applied_profile() {
     let mut orch = orchestrator(lost_ark_config());
@@ -945,13 +964,34 @@ fn an_unknown_focus_keeps_the_applied_profile() {
     orch.rebuild();
     assert!(orch.reconcile_focus(Some(focus("lostark.exe"))));
     assert_eq!(published_back_binding(&orch), Some(hyper()));
+    // The shifted layer travels the other seam — the OS hook's maps, not the
+    // HID++ capture plans — so it needs its own assertion at every step.
+    assert_eq!(
+        published_g_shift_binding(&orch, ButtonId::RightClick),
+        Some(superright())
+    );
+    assert_eq!(
+        orch.observable.snapshot().active_profile,
+        Some(ProfileId("lost-ark".into()))
+    );
 
     // Reading failed, or the desktop is in front: nothing identifiable took focus.
     assert!(!orch.reconcile_focus(None), "unknown is not a change");
     assert_eq!(published_back_binding(&orch), Some(hyper()));
+    assert_eq!(
+        published_g_shift_binding(&orch, ButtonId::RightClick),
+        Some(superright()),
+        "an unknown reading must not tear the shifted layer down"
+    );
 
     assert!(orch.reconcile_focus(Some(focus("org.gnome.Nautilus"))));
     assert_ne!(published_back_binding(&orch), Some(hyper()));
+    assert_eq!(
+        published_g_shift_binding(&orch, ButtonId::RightClick),
+        None,
+        "another app in front leaves no shifted layer behind"
+    );
+    assert_eq!(orch.observable.snapshot().active_profile, None);
 }
 
 #[test]
