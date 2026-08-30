@@ -100,10 +100,23 @@ export default class OpenLogiFrontmostExtension extends Extension {
     }
 
     _untrackTitle() {
-        if (this._titledWindow && this._titleId)
-            this._titledWindow.disconnect(this._titleId);
+        // Clear the fields before touching the window: Mutter disposes a
+        // MetaWindow at unmanage, and GJS throws on any access to a disposed
+        // object. If a stale `disconnect` below throws, the fields must
+        // already be cleared so the next `_onFocusChanged` doesn't inherit a
+        // disposed window and throw before ever reaching `_emit`.
+        const win = this._titledWindow;
+        const id = this._titleId;
         this._titledWindow = null;
         this._titleId = 0;
+        if (win && id) {
+            try {
+                win.disconnect(id);
+            } catch (e) {
+                // The window was already disposed (unmanaged); nothing left
+                // to disconnect.
+            }
+        }
     }
 
     _emit(win) {

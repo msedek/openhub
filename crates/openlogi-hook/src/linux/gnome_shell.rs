@@ -155,25 +155,39 @@ impl FrontmostSource for GnomeShellSource {
         let Some(conn) = session_connection() else {
             return false;
         };
+        let proxy = match FrontmostProxy::new(&conn) {
+            Ok(proxy) => proxy,
+            Err(e) => {
+                debug!("gnome-shell: push proxy build failed: {e}");
+                return false;
+            }
+        };
+        // `receive_focus_changed` only installs a D-Bus match rule and
+        // succeeds whether or not the service ever emits it — including
+        // against a v1 extension, which has no such signal at all. Probe the
+        // v2-only `GetFocusedWindow` method on this connection first, so a
+        // v1 extension is correctly reported as having no push source
+        // instead of a match rule that silently never fires (which would
+        // otherwise leave the caller polling three times slower for nothing).
+        if let Err(e) = proxy.get_focused_window() {
+            debug!("gnome-shell: {e}, extension is v1 — no push, polling only");
+            return false;
+        }
+        let stream = match proxy.receive_focus_changed() {
+            Ok(s) => s,
+            Err(e) => {
+                debug!("gnome-shell: signal subscription failed: {e}");
+                return false;
+            }
+        };
         thread::Builder::new()
             .name("openlogi-focus-push".into())
             .spawn(move || {
-                let proxy = match FrontmostProxy::new(&conn) {
-                    Ok(proxy) => proxy,
-                    Err(e) => {
-                        debug!("gnome-shell: push proxy build failed: {e}");
-                        return;
-                    }
-                };
-                let stream = match proxy.receive_focus_changed() {
-                    Ok(s) => s,
-                    Err(e) => {
-                        debug!("gnome-shell: signal subscription failed: {e}");
-                        return;
-                    }
-                };
                 for signal in stream {
-                    let Ok(args) = signal.args() else { continue };
+                    let Ok(args) = signal.args() else {
+                        debug!("gnome-shell: FocusChanged signal args failed to deserialize");
+                        continue;
+                    };
                     on_reading(describe(
                         args.wm_class().clone(),
                         args.title().clone(),
