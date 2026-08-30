@@ -120,25 +120,73 @@ fn resolve_gesture_click_prefers_explicit_then_falls_back_to_default() {
 
 #[test]
 fn fail_open_press_pairs_release() {
-    let mut fail_open = HashSet::new();
+    let mut presses = HashMap::new();
     assert_eq!(
-        remapped_press_disposition(ButtonId::Back, true, &mut fail_open),
+        press_disposition(ButtonId::Back, true, &mut presses),
         EventDisposition::Suppress
     );
     assert_eq!(
-        remapped_release_disposition(ButtonId::Back, &mut fail_open),
+        release_disposition(ButtonId::Back, false, &mut presses),
         EventDisposition::Suppress
     );
     assert_eq!(
-        remapped_press_disposition(ButtonId::Forward, false, &mut fail_open),
+        press_disposition(ButtonId::Forward, false, &mut presses),
         EventDisposition::PassThrough
     );
     assert_eq!(
-        remapped_release_disposition(ButtonId::Forward, &mut fail_open),
+        release_disposition(ButtonId::Forward, false, &mut presses),
         EventDisposition::PassThrough
     );
     assert_eq!(
-        remapped_release_disposition(ButtonId::Forward, &mut fail_open),
+        release_disposition(ButtonId::Forward, false, &mut presses),
+        EventDisposition::Suppress,
+        "the press it paired with is spent"
+    );
+}
+
+#[test]
+fn a_passed_through_press_pairs_its_release_after_a_rebuild() {
+    // The G-Shift layer opening (or a profile switch) between a press and its
+    // release must not leave the desktop holding a button whose up never came.
+    let mut presses = HashMap::new();
+    assert_eq!(
+        press_disposition(ButtonId::Back, false, &mut presses),
+        EventDisposition::PassThrough
+    );
+    assert_eq!(
+        release_disposition(ButtonId::Back, false, &mut presses),
+        EventDisposition::PassThrough,
+        "the map suppresses this button now, but its press already reached the desktop"
+    );
+}
+
+#[test]
+fn a_suppressed_press_pairs_its_release_after_a_rebuild() {
+    // The mirror case: the layer closing mid-press must not let through a
+    // release for a down the app never saw.
+    let mut presses = HashMap::new();
+    assert_eq!(
+        press_disposition(ButtonId::Back, true, &mut presses),
+        EventDisposition::Suppress
+    );
+    assert_eq!(
+        release_disposition(ButtonId::Back, true, &mut presses),
+        EventDisposition::Suppress,
+        "the map passes this button through now, but its press was swallowed"
+    );
+}
+
+#[test]
+fn a_release_with_no_recorded_press_follows_the_current_map() {
+    // The hook started while the button was already down: there is no press to
+    // pair with, so the map is all there is to go on.
+    let mut presses = HashMap::new();
+    assert_eq!(
+        release_disposition(ButtonId::LeftClick, true, &mut presses),
+        EventDisposition::PassThrough
+    );
+    assert_eq!(
+        release_disposition(ButtonId::Back, false, &mut presses),
         EventDisposition::Suppress
     );
 }

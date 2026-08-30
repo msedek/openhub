@@ -4,7 +4,7 @@
 //! and converts callback-thread mouse/key input into the shared action runtime.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, RwLock};
@@ -200,16 +200,20 @@ thread_local! {
     /// Thread-local rather than a shared `Mutex` keeps the hot path lock-free and
     /// free of cross-thread contention on the freeze-sensitive callback.
     static HOLD: RefCell<HoldState> = RefCell::new(HoldState::default());
-    /// Buttons whose physical press was delivered because the action queue
-    /// rejected the remap. Their matching release must also pass through so
-    /// apps never see a stuck auxiliary button (down without up).
-    static FAIL_OPEN_PRESSES: RefCell<HashSet<ButtonId>> = RefCell::new(HashSet::new());
+    /// What each held button's press decided, so its release can repeat that
+    /// decision instead of re-deriving one from a map that may have changed in
+    /// between — a profile switch, a config reload, or the G-Shift layer
+    /// opening or closing mid-press. A release that disagrees with its own
+    /// press is either a stuck auxiliary button (down, never up) or an up the
+    /// app never saw a down for.
+    static PRESS_DISPOSITIONS: RefCell<HashMap<ButtonId, EventDisposition>> =
+        RefCell::new(HashMap::new());
     /// Function keys whose held action owns an accepted lifecycle. Repeated
     /// key-down events are auto-repeat, not replacement presses; their first
     /// matching key-up ends the lifecycle.
     static HELD_KEYS: RefCell<HashSet<u16>> = RefCell::new(HashSet::new());
     /// Buttons whose press resolved in the shifted layer, so their release
-    /// resolves there too. Per thread, like `FAIL_OPEN_PRESSES`: a press and
+    /// resolves there too. Per thread, like `PRESS_DISPOSITIONS`: a press and
     /// its release come from the same device.
     static SHIFTED_PRESSES: RefCell<HashSet<ButtonId>> = RefCell::new(HashSet::new());
     /// The physical button whose press set `G_SHIFT_HELD`, remembered so its
@@ -387,9 +391,9 @@ fn handle_button(
             }
             if let Some(press) = dispatcher.try_hook_button_down(id, None) {
                 HOLD.with_borrow_mut(|h| h.begin(id, press));
-                return EventDisposition::Suppress;
+                return PRESS_DISPOSITIONS.with_borrow_mut(|s| press_disposition(id, true, s));
             }
-            return FAIL_OPEN_PRESSES.with_borrow_mut(|s| remapped_press_disposition(id, false, s));
+            return PRESS_DISPOSITIONS.with_borrow_mut(|s| press_disposition(id, false, s));
         }
     } else {
         // Drop the HOLD borrow before any queueing (re-entrancy freeze hazard).
@@ -406,26 +410,35 @@ fn handle_button(
                 }
             }
             dispatcher.try_hook_button_up(id);
-            return EventDisposition::Suppress;
+            // The hold's own press is what this release pairs with; the entry
+            // it left behind is spent either way.
+            return PRESS_DISPOSITIONS.with_borrow_mut(|s| release_disposition(id, false, s));
         }
     }
 
+    // What the map says *right now*: the whole answer for a press, and only a
+    // fallback for a release, which must pair with what its own press already
+    // did rather than re-decide from a map a rebuild may have changed since.
     let binding = hooks.try_read().ok().and_then(|m| m.resolve(id, shifted));
-    let Some(binding) = binding else {
-        return EventDisposition::PassThrough;
+    let remapped = binding
+        .as_ref()
+        .filter(|binding| !binding_passes_through(id, binding));
+
+    if !pressed {
+        // End the lifecycle before deciding anything. `try_hook_button_up` is
+        // a no-op when the press opened none, and returning early instead is
+        // how a suppressed press whose binding vanished mid-hold used to leave
+        // its lifecycle — and any macro run it owned — outstanding forever.
+        dispatcher.try_hook_button_up(id);
+        return PRESS_DISPOSITIONS
+            .with_borrow_mut(|s| release_disposition(id, remapped.is_none(), s));
+    }
+    let Some(binding) = remapped else {
+        return PRESS_DISPOSITIONS.with_borrow_mut(|s| press_disposition(id, false, s));
     };
-    if binding_passes_through(id, &binding) {
-        return EventDisposition::PassThrough;
-    }
-    if pressed {
-        info!(button = %id, action = %binding.click_action().label(), "button → handling binding");
-        let queued = dispatcher
-            .try_hook_button_down(id, Some(&binding))
-            .is_some();
-        return FAIL_OPEN_PRESSES.with_borrow_mut(|s| remapped_press_disposition(id, queued, s));
-    }
-    dispatcher.try_hook_button_up(id);
-    FAIL_OPEN_PRESSES.with_borrow_mut(|s| remapped_release_disposition(id, s))
+    info!(button = %id, action = %binding.click_action().label(), "button → handling binding");
+    let suppressed = dispatcher.try_hook_button_down(id, Some(binding)).is_some();
+    PRESS_DISPOSITIONS.with_borrow_mut(|s| press_disposition(id, suppressed, s))
 }
 
 /// Whether the hook must leave this button's physical event to the desktop.
@@ -446,33 +459,43 @@ fn binding_passes_through(id: ButtonId, binding: &Binding) -> bool {
     is_native_click(id, &action) || !id.may_suppress(&action)
 }
 
-/// Press of a remapped single-action button: suppress when the action was
-/// queued, otherwise pass through and mark `id` so the release pairs.
-fn remapped_press_disposition(
+/// Press of a button the hook decodes: suppress when the remap was accepted,
+/// otherwise let the physical press reach the desktop. Either way the decision
+/// is recorded under `id` for the release to repeat.
+///
+/// The two ways a press passes through — the action queue rejected the remap,
+/// or the binding was never suppressible to begin with — are deliberately not
+/// told apart: both leave the desktop holding this button down.
+fn press_disposition(
     id: ButtonId,
-    queued: bool,
-    fail_open: &mut HashSet<ButtonId>,
+    suppressed: bool,
+    presses: &mut HashMap<ButtonId, EventDisposition>,
 ) -> EventDisposition {
-    if queued {
-        fail_open.remove(&id);
+    let disposition = if suppressed {
         EventDisposition::Suppress
     } else {
-        fail_open.insert(id);
         EventDisposition::PassThrough
-    }
+    };
+    presses.insert(id, disposition);
+    disposition
 }
 
-/// Release of a remapped single-action button: pass through only when the
-/// matching press was fail-opened (queue rejection), else suppress.
-fn remapped_release_disposition(
+/// Release of a button the hook decodes: a release always repeats what its own
+/// press decided, whatever a config rebuild did to the map in between.
+///
+/// Only a release whose press this thread never recorded — the hook started
+/// while the button was already down — has nothing to pair with, and falls
+/// back to `map_passes_through`, what the map says now.
+fn release_disposition(
     id: ButtonId,
-    fail_open: &mut HashSet<ButtonId>,
+    map_passes_through: bool,
+    presses: &mut HashMap<ButtonId, EventDisposition>,
 ) -> EventDisposition {
-    if fail_open.remove(&id) {
+    presses.remove(&id).unwrap_or(if map_passes_through {
         EventDisposition::PassThrough
     } else {
         EventDisposition::Suppress
-    }
+    })
 }
 
 /// Suppress only input accepted by an off-thread runtime. Rejected input must
