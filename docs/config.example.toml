@@ -113,3 +113,27 @@ dpi = 800
 [keyboard.bindings]
 f1 = "MissionControl"
 "shift+command+f5" = "ShowDesktop"
+
+# Per-game profiles. A profile applies while a matching window has focus; it
+# overlays the device bindings and any per-app overlay, and it falls only when
+# another identifiable window takes focus — going to the desktop keeps it.
+# Rules: WmClass (the application id above, case-insensitive) beats SteamAppId
+# beats Title (a regular expression).
+[profiles.lost-ark]
+name = "Lost Ark"
+matches = [{ WmClass = "lostark.exe" }, { SteamAppId = 1599340 }, { Title = "^LOST ARK" }]
+
+[profiles.lost-ark.assignments.normal]
+MiddleClick = { RunMacro = "superspace" }
+Back = { RunMacro = "hyper" }
+
+[profiles.lost-ark.assignments.g_shift]
+RightClick = { RunMacro = "superright" }
+
+# Macros a RunMacro binding refers to by id. Steps are Linux input event
+# codes; `held_codes` are released on every exit, so a key is never left down.
+[macros.superspace]
+id = "superspace"
+name = "SuperSpace"
+steps = [{ KeyTap = 57 }]
+repeat = { WhileHeld = { interval_ms = 25 } }

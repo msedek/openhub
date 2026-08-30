@@ -41,3 +41,36 @@ impl ForegroundApp {
         }
     }
 }
+
+/// Everything a focus source could read about the window in front.
+///
+/// Agent-internal: it never crosses the IPC boundary. [`ForegroundApp`] is its
+/// wire projection, and the extra fields exist only so a per-game profile can
+/// fall back from the application identifier to a Steam AppID or a window
+/// title (spec §6, rule 3). Every field but `app` is `None` where the source
+/// cannot read it — macOS and Windows report the application only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FocusedWindow {
+    /// The application, as the per-app overlay and the GUI already know it.
+    pub app: ForegroundApp,
+    /// The window title, when the source reports one.
+    pub title: Option<String>,
+    /// The client process, when the source reports one.
+    pub pid: Option<u32>,
+    /// `SteamAppId` from the client's environment, when `pid` is known and the
+    /// process was launched by Steam.
+    pub steam_app_id: Option<u32>,
+}
+
+impl FocusedWindow {
+    /// A reading that knows the application and nothing else.
+    #[must_use]
+    pub fn app(app: ForegroundApp) -> Self {
+        Self {
+            app,
+            title: None,
+            pid: None,
+            steam_app_id: None,
+        }
+    }
+}

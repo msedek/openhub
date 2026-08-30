@@ -38,6 +38,9 @@ fluent-langneg = { version = "0.14.2", optional = true }
 rust-i18n = { version = "4", optional = true }
 sys-locale = { version = "0.3.2", optional = true }
 num_enum = { workspace = true }
+# Title rules. The lite build has no unicode tables, which keeps the wasm32
+# check small; a window title needs none of them.
+regex-lite = "0.1"
 strum = { version = "0.27", features = ["derive"] }
 toml_edit = { version = "0.22", optional = true }
 nutype = { version = "0.7.0", features = ["serde"] }

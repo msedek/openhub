@@ -44,6 +44,7 @@ use crate::binding::{
 };
 use crate::device_order::PhysicalDeviceKey;
 use crate::hid::Dpi;
+use crate::profile::{GameProfile, ProfileId};
 #[cfg(feature = "fs")]
 use settings::GestureOwner;
 /// The schema version the current build produces. Bumped whenever the
@@ -144,6 +145,14 @@ pub struct Config {
     /// `ui_scale` above.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub macros: BTreeMap<MacroId, Macro>,
+    /// Per-game profiles, keyed by the id the agent publishes as the applied
+    /// one. Document-scoped for the same reason `macros` is: the OS-hook path
+    /// that a gaming mouse's buttons arrive on carries no device key.
+    ///
+    /// `#[serde(default)]` keeps configs without a `[profiles]` section
+    /// loading unchanged, so this needs no schema bump either.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub profiles: BTreeMap<ProfileId, GameProfile>,
 }
 
 impl Default for Config {
@@ -156,6 +165,7 @@ impl Default for Config {
             ephemeral: false,
             keyboard: KeyboardConfig::default(),
             macros: BTreeMap::new(),
+            profiles: BTreeMap::new(),
         }
     }
 }

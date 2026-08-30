@@ -27,6 +27,7 @@ pub mod hid;
 pub mod locale;
 #[cfg(feature = "fs")]
 pub mod paths;
+pub mod profile;
 pub mod scroll;
 #[cfg(feature = "fs")]
 pub mod single_instance;

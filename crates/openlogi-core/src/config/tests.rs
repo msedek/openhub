@@ -5,6 +5,8 @@ use std::{assert_matches, fs};
 use super::*;
 use crate::binding::{default_binding, default_gesture_binding};
 use crate::hid::{Dpi, SmartShiftAutoDisengage, SmartShiftThreshold, TunableTorque};
+use crate::profile::{Assignments, GameProfile, MatchRule, ProfileId};
+use ghub_macro::MacroId;
 
 fn write_and_read(config: &Config) -> Config {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -24,6 +26,45 @@ fn canonical_configuration_example_parses() {
     };
     assert_eq!(long_press.short(), &Action::ShowDesktop);
     assert_eq!(long_press.long(), &Action::MissionControl);
+}
+
+#[test]
+fn profiles_roundtrip_and_the_example_carries_one() {
+    let mut cfg = Config::default();
+    let mut profile = GameProfile {
+        name: "Lost Ark".into(),
+        icon: None,
+        matches: vec![MatchRule::WmClass("lostark.exe".into())],
+        assignments: Assignments::default(),
+    };
+    profile.assignments.normal.insert(
+        ButtonId::MiddleClick,
+        Action::RunMacro(MacroId("superspace".into())),
+    );
+    cfg.profiles
+        .insert(ProfileId("lost-ark".into()), profile.clone());
+    let restored = write_and_read(&cfg);
+    assert_eq!(
+        restored.profiles.get(&ProfileId("lost-ark".into())),
+        Some(&profile)
+    );
+
+    let body = include_str!("../../../../docs/config.example.toml");
+    let documented: Config = toml::from_str(body).expect("documented config must parse");
+    let example = documented
+        .profiles
+        .get(&ProfileId("lost-ark".into()))
+        .expect("the example documents one profile");
+    assert!(
+        example
+            .matches
+            .iter()
+            .any(|rule| matches!(rule, MatchRule::WmClass(_)))
+    );
+    assert!(
+        !example.assignments.g_shift.is_empty(),
+        "the example shows the G-Shift layer"
+    );
 }
 
 #[test]
