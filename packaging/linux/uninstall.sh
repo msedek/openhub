@@ -48,6 +48,11 @@ echo "Removing binaries …"
 sudo rm -f "${BINDIR}/openlogi" "${BINDIR}/openlogi-desktop" \
   "${BINDIR}/openlogi-overlay" "${BINDIR}/openlogi-agent"
 
+# ── GNOME Shell extension ─────────────────────────────────────────────────────
+
+echo "Removing GNOME Shell extension …"
+sudo rm -rf /usr/share/gnome-shell/extensions/openlogi-frontmost@openlogi.dev
+
 # ── udev rules ────────────────────────────────────────────────────────────────
 
 echo "Removing udev rules …"

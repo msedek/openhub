@@ -42,8 +42,10 @@ use crate::binding::{
     Action, ActionRingConfig, ActionRingIcon, ActionRingSlot, Binding, ButtonId, GestureDirection,
     RingAction, default_binding, default_binding_for, default_gesture_binding,
 };
+use crate::bindings::ActiveScope;
 use crate::device_order::PhysicalDeviceKey;
 use crate::hid::Dpi;
+use crate::profile::{GameProfile, ProfileId};
 #[cfg(feature = "fs")]
 use settings::GestureOwner;
 /// The schema version the current build produces. Bumped whenever the
@@ -144,6 +146,14 @@ pub struct Config {
     /// `ui_scale` above.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub macros: BTreeMap<MacroId, Macro>,
+    /// Per-game profiles, keyed by the id the agent publishes as the applied
+    /// one. Document-scoped for the same reason `macros` is: the OS-hook path
+    /// that a gaming mouse's buttons arrive on carries no device key.
+    ///
+    /// `#[serde(default)]` keeps configs without a `[profiles]` section
+    /// loading unchanged, so this needs no schema bump either.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub profiles: BTreeMap<ProfileId, GameProfile>,
 }
 
 impl Default for Config {
@@ -156,6 +166,7 @@ impl Default for Config {
             ephemeral: false,
             keyboard: KeyboardConfig::default(),
             macros: BTreeMap::new(),
+            profiles: BTreeMap::new(),
         }
     }
 }
@@ -558,6 +569,43 @@ impl Config {
             }
         }
         out
+    }
+
+    /// [`Self::effective_bindings`] with the applied profile's `normal` layer
+    /// on top. The profile overlay does not require a device entry: a profile
+    /// is document-scoped and a mouse seen for the first time still gets it.
+    #[must_use]
+    pub fn effective_bindings_in(
+        &self,
+        device_key: &str,
+        scope: &ActiveScope,
+    ) -> BTreeMap<ButtonId, Binding> {
+        let mut out = self.effective_bindings(device_key, scope.app.as_deref());
+        if let Some(profile) = scope.profile.as_ref().and_then(|id| self.profiles.get(id)) {
+            for (button, action) in &profile.assignments.normal {
+                out.insert(*button, Binding::Single(action.clone()));
+            }
+        }
+        out
+    }
+
+    /// The applied profile's `g_shift` layer as bindings; only the buttons the
+    /// layer changes are present.
+    #[must_use]
+    pub fn g_shift_layer(&self, scope: &ActiveScope) -> BTreeMap<ButtonId, Binding> {
+        scope
+            .profile
+            .as_ref()
+            .and_then(|id| self.profiles.get(id))
+            .map(|profile| {
+                profile
+                    .assignments
+                    .g_shift
+                    .iter()
+                    .map(|(button, action)| (*button, Binding::Single(action.clone())))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Records a per-app override. Creates the device + app entries as

@@ -84,6 +84,12 @@ cargo run -p openlogi-desktop
 Development handbook: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 Linux installation and udev rules: [docs/INSTALL-linux.md](docs/INSTALL-linux.md).
 
+On GNOME running Wayland, per-game profile switching needs one extra step: a
+bundled GNOME Shell extension that exposes the focused window over D-Bus,
+since Mutter otherwise hides it from ordinary clients. See
+[Per-game profiles on GNOME Wayland](docs/INSTALL-linux.md#per-game-profiles-on-gnome-wayland)
+in the install guide.
+
 ## Design documents
 
 - [G HUB clone design](docs/superpowers/specs/2026-08-27-openhub-design.md) — the architecture, the verified hardware findings, and the reasoning behind each decision.

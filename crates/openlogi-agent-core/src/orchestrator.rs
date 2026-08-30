@@ -14,14 +14,17 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
-use openlogi_core::app::ForegroundApp;
+use openlogi_core::app::{FocusedWindow, ForegroundApp};
 use openlogi_core::binding::{Action, Binding};
-use openlogi_core::bindings::{button_bindings_for, oshook_gestures_for};
+use openlogi_core::bindings::{
+    ActiveScope, button_bindings_for, g_shift_bindings_for, oshook_gestures_for,
+};
 use openlogi_core::config::{Config, LightSettings, ScrollResolution};
 use openlogi_core::device::{
     Capabilities, DeviceInventory, DeviceKind, LightCapabilities, StandaloneDevice,
 };
 use openlogi_core::device_order::{DeviceIdentity, DeviceStableId};
+use openlogi_core::profile::{self, ProfileId};
 use openlogi_hid::{
     CaptureChannel, ChannelPool, ChannelRegistry, DIRECT_DEVICE_INDEX, DeviceRoute,
     KEYBOARD_KEY_CIDS,
@@ -143,6 +146,11 @@ pub struct Orchestrator {
     devices: Vec<AgentDevice>,
     current: usize,
     current_app: Option<String>,
+    /// The last *identifiable* window the focus source reported. A `None`
+    /// reading is unknown, not empty — it leaves this alone (spec §6, rule 2).
+    last_focus: Option<FocusedWindow>,
+    /// The per-game profile applied to the hook maps and capture plans.
+    active_profile: Option<ProfileId>,
     /// The latest inventory snapshot, kept so the IPC server can answer the
     /// GUI's `inventory()` polls without re-enumerating (the agent owns all
     /// device I/O). The enum keeps "nothing checked yet" and "enumeration
@@ -222,6 +230,8 @@ impl Orchestrator {
             devices: Vec::new(),
             current: 0,
             current_app: None,
+            last_focus: None,
+            active_profile: None,
             inventory: InventoryState::Pending,
             reapply_all_next_refresh: false,
             hid_open_failures: false,
@@ -250,11 +260,11 @@ impl Orchestrator {
             .map(|d| d.config_key.as_str())
     }
 
-    /// Build the OS-hook callback's maps for `key` + foreground `app`. Both hook
-    /// sub-maps are app-scoped (a per-app override can demote the gesture owner),
+    /// Build the OS-hook callback's maps for `key` + `scope`. Both hook
+    /// sub-maps are scope-aware (a per-app override can demote the gesture owner),
     /// so they're built together here and published under one lock — keeping
     /// `rebuild` and `set_current_app` from drifting into a half-populated write.
-    fn hook_maps_for(&self, key: Option<&str>, app: Option<&str>) -> HookMaps {
+    fn hook_maps_for(&self, key: Option<&str>, scope: &ActiveScope) -> HookMaps {
         // A disabled selected device gets empty maps: the OS hook then passes
         // its events through untouched instead of applying remaps to a device
         // the user asked OpenLogi to leave alone.
@@ -262,8 +272,17 @@ impl Orchestrator {
             return HookMaps::default();
         }
         HookMaps {
-            bindings: button_bindings_for(&self.config, key, app),
-            gestures: oshook_gestures_for(&self.config, key, app),
+            bindings: button_bindings_for(&self.config, key, scope),
+            gestures: oshook_gestures_for(&self.config, key, scope),
+            g_shift: g_shift_bindings_for(&self.config, scope),
+        }
+    }
+
+    /// What the hook maps and capture plans are resolved against right now.
+    fn scope(&self) -> ActiveScope {
+        ActiveScope {
+            app: self.current_app.clone(),
+            profile: self.active_profile.clone(),
         }
     }
 
@@ -283,11 +302,7 @@ impl Orchestrator {
             .devices
             .iter()
             .find(|d| d.kind == DeviceKind::Keyboard && d.route.is_some())?;
-        let bindings = button_bindings_for(
-            &self.config,
-            Some(&dev.config_key),
-            self.current_app.as_deref(),
-        );
+        let bindings = button_bindings_for(&self.config, Some(&dev.config_key), &self.scope());
         let wanted: BTreeMap<u16, _> = KEYBOARD_KEY_CIDS
             .iter()
             .filter(|(_, button)| {
@@ -316,7 +331,7 @@ impl Orchestrator {
         // an owner switch can't observe a half-updated state.
         write_value(
             &self.shared.hook_maps,
-            self.hook_maps_for(key, self.current_app.as_deref()),
+            self.hook_maps_for(key, &self.scope()),
             "hook_maps",
         );
         self.publish_device_runtime();
@@ -404,7 +419,7 @@ impl Orchestrator {
                     &self.config,
                     &dev.config_key,
                     route,
-                    self.current_app.as_deref(),
+                    &self.scope(),
                     rearm_generation,
                 ))
             })
@@ -729,38 +744,59 @@ impl Orchestrator {
         }
     }
 
-    /// Foreground-app change → re-overlay per-app bindings on the hook maps and
-    /// republish the capture plans, whose binding maps and divert sets are
-    /// per-app effective too (HID++ dispatch reads them at event time). Both
-    /// hook maps are recomputed: a per-app override of the gesture owner turns
-    /// it into a single action for that app, dropping it from the OS-hook
-    /// gesture set — so the gesture map is app-scoped too. The dedicated HID++
-    /// gesture map is not app-scoped and stays untouched.
+    /// Converge the applied scope on `reading`.
     ///
-    /// Only the identifier decides whether any of that runs: an application
-    /// that merely changed its localized name resolves to the same bindings,
-    /// and republishing for it could restart a capture session (a plan's
-    /// divert set is part of its identity) over nothing. The observable cell
-    /// still gets the whole value — it dedupes on its own, and its recent list
-    /// is the only source a client has for these identifiers. Returns whether
-    /// the effective app identifier changed and active button lifecycles must
-    /// be canceled.
-    pub fn set_current_app(&mut self, app: Option<ForegroundApp>) -> bool {
-        let id = app.as_ref().map(|app| app.id.clone());
-        self.observable.set_foreground(app);
-        if id == self.current_app {
+    /// Level-triggered: the caller feeds every reading, and this compares the
+    /// scope the config says *should* apply against the one that *is*
+    /// applied. Unchanged is cheap and returns `false`, which matters because
+    /// the caller cancels every press lifecycle on `true` — a G-Shift hold
+    /// across a poll tick must survive. A `None` reading keeps the last
+    /// identifiable window: the desktop, an unnamed window, or a failed read
+    /// never drop a profile; only another identifiable window does.
+    ///
+    /// Re-overlays per-app bindings on the hook maps and republishes the
+    /// capture plans, whose binding maps and divert sets are per-app and
+    /// per-profile effective too (HID++ dispatch reads them at event time).
+    /// Both hook maps are recomputed: a per-app override of the gesture owner
+    /// turns it into a single action for that app, dropping it from the
+    /// OS-hook gesture set — so the gesture map is app-scoped too. The
+    /// dedicated HID++ gesture map is not app-scoped and stays untouched.
+    pub fn reconcile_focus(&mut self, reading: Option<FocusedWindow>) -> bool {
+        if let Some(window) = reading {
+            self.last_focus = Some(window);
+        }
+        let app = self.last_focus.as_ref().map(|window| window.app.id.clone());
+        let applied_profile = self
+            .last_focus
+            .as_ref()
+            .and_then(|window| profile::resolve(&self.config.profiles, window))
+            .cloned();
+        self.observable
+            .set_foreground(self.last_focus.as_ref().map(|window| window.app.clone()));
+        if app == self.current_app && applied_profile == self.active_profile {
             return false;
         }
-        self.current_app = id;
+        if applied_profile != self.active_profile {
+            info!(from = ?self.active_profile, to = ?applied_profile, "profile applied");
+        }
+        self.current_app = app;
+        self.active_profile = applied_profile;
+        self.observable
+            .set_active_profile(self.active_profile.clone());
         write_value(
             &self.shared.hook_maps,
-            self.hook_maps_for(self.current_key(), self.current_app.as_deref()),
+            self.hook_maps_for(self.current_key(), &self.scope()),
             "hook_maps",
         );
-        // Capture plans are app-scoped (per-app binding overlays); republish
-        // them with the keyboard's effective bindings.
+        // Capture plans are app- and profile-scoped; republish them with the
+        // keyboard's effective bindings.
         self.publish_device_runtime();
         true
+    }
+
+    /// [`Self::reconcile_focus`] for a caller that knows the application only.
+    pub fn set_current_app(&mut self, app: Option<ForegroundApp>) -> bool {
+        self.reconcile_focus(app.map(FocusedWindow::app))
     }
 
     /// Replace the config (after `config.toml` changed) and rebuild everything.
@@ -792,6 +828,15 @@ impl Orchestrator {
         self.manual_light_overrides
             .retain(|key, _| retained_overrides.contains(key));
         self.current = pick_current(&self.devices, self.config.selected_device());
+        // The window did not change but the profiles may have: re-run the
+        // matcher against the last reading so the reload alone applies it.
+        self.active_profile = self
+            .last_focus
+            .as_ref()
+            .and_then(|window| profile::resolve(&self.config.profiles, window))
+            .cloned();
+        self.observable
+            .set_active_profile(self.active_profile.clone());
         self.rebuild();
         self.apply_native_wheel_modes();
         self.apply_fn_locks();

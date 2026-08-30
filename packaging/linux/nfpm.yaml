@@ -59,6 +59,19 @@ contents:
     file_info:
       mode: 0644
 
+  # ── GNOME Shell extension ───────────────────────────────────────────────────
+  # Required for per-game profiles on GNOME Wayland: the focused window is not
+  # visible to ordinary clients there. System-wide install; each user still
+  # enables it (`gnome-extensions enable openlogi-frontmost@openlogi.dev`).
+  - src: crates/openlogi-hook/gnome-shell-extension/openlogi-frontmost@openlogi.dev/extension.js
+    dst: /usr/share/gnome-shell/extensions/openlogi-frontmost@openlogi.dev/extension.js
+    file_info:
+      mode: 0644
+  - src: crates/openlogi-hook/gnome-shell-extension/openlogi-frontmost@openlogi.dev/metadata.json
+    dst: /usr/share/gnome-shell/extensions/openlogi-frontmost@openlogi.dev/metadata.json
+    file_info:
+      mode: 0644
+
   # ── icon ────────────────────────────────────────────────────────────────────
   # Every standard indexed hicolor size, not just the 1024 master: a stock
   # `hicolor/index.theme` stops at 512x512, so a launcher that resolves icons

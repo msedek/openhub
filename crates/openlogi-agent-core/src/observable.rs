@@ -17,6 +17,7 @@
 use openlogi_core::app::ForegroundApp;
 use openlogi_core::brand::is_openlogi_foreground_id;
 use openlogi_core::device::{DeviceInventory, StandaloneDevice};
+use openlogi_core::profile::ProfileId;
 use openlogi_hook::Hook;
 use openlogi_ipc::{
     AgentSnapshot, AgentStatus, ForegroundApps, FoundDevice, Generation, InventoryHealth,
@@ -60,6 +61,7 @@ impl ObservableState {
                 camera_active: false,
                 pairing: None,
                 foreground: ForegroundApps::default(),
+                active_profile: None,
             },
         });
         Self { tx }
@@ -250,6 +252,18 @@ impl ObservableState {
                 recent.truncate(RECENT_APPS);
             }
             snapshot.foreground.current = app;
+            true
+        });
+    }
+
+    /// Publish which per-game profile [`Orchestrator::reconcile_focus`](crate::orchestrator::Orchestrator::reconcile_focus)
+    /// applied, so a client can show it without a matcher of its own.
+    pub fn set_active_profile(&self, profile: Option<ProfileId>) {
+        self.update(|snapshot| {
+            if snapshot.active_profile == profile {
+                return false;
+            }
+            snapshot.active_profile = profile;
             true
         });
     }

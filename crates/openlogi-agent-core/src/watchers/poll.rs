@@ -44,6 +44,34 @@ impl Poll {
         F: Fn() -> T + Send + 'static,
     {
         let (tx, rx) = mpsc::unbounded_channel();
+        self.run(tx, read, true);
+        rx
+    }
+
+    /// Report what `read` returns on every tick, changed or not, into `tx`.
+    ///
+    /// For a consumer that reconciles by level rather than by edge: it wants
+    /// the current value each period so a missed transition heals on the next
+    /// tick. Taking the sender lets a push source share the channel.
+    pub fn every_into<T, F>(self, tx: mpsc::UnboundedSender<T>, read: F)
+    where
+        T: Clone + PartialEq + Debug + Send + 'static,
+        F: Fn() -> T + Send + 'static,
+    {
+        self.run(tx, read, false);
+    }
+
+    /// Shared thread body for [`Self::on_change`] and [`Self::every_into`].
+    ///
+    /// With `dedup`, only a value that differs from the last one sent goes
+    /// out, and the change is logged. Without it, every sample goes out
+    /// silently — the consumer reconciles by level, so a repeated sample is
+    /// expected, not noteworthy.
+    fn run<T, F>(self, tx: mpsc::UnboundedSender<T>, read: F, dedup: bool)
+    where
+        T: Clone + PartialEq + Debug + Send + 'static,
+        F: Fn() -> T + Send + 'static,
+    {
         let spawned = thread::Builder::new()
             .name(self.name.into())
             .spawn(move || {
@@ -53,8 +81,10 @@ impl Poll {
                     // `None` is "nothing reported yet", never a value, so the
                     // first sample always goes out even when `T` itself is an
                     // `Option` that starts at `None`.
-                    if last.as_ref() != Some(&current) {
-                        debug!(watcher = self.name, value = ?current, "changed");
+                    if !dedup || last.as_ref() != Some(&current) {
+                        if dedup {
+                            debug!(watcher = self.name, value = ?current, "changed");
+                        }
                         if tx.send(current.clone()).is_err() {
                             debug!(watcher = self.name, "receiver dropped — exiting");
                             return;
@@ -72,7 +102,6 @@ impl Poll {
                 self.degrades
             );
         }
-        rx
     }
 }
 
@@ -131,6 +160,22 @@ mod tests {
         // `false` opens the stream even though it equals `T::default()`, then
         // only the two transitions follow.
         assert_eq!(drain(&mut rx, 3), vec![false, true, false]);
+    }
+
+    #[test]
+    fn every_reports_unchanged_samples() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        Poll {
+            name: "openlogi-test-watcher",
+            period: Duration::from_millis(1),
+            degrades: "the test learns nothing",
+        }
+        .every_into(tx, || 7u8);
+        assert_eq!(
+            drain(&mut rx, 2),
+            vec![7, 7],
+            "the second identical sample is still reported"
+        );
     }
 
     #[test]

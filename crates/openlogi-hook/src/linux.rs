@@ -42,8 +42,8 @@ use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt as _, Window};
 use x11rb::rust_connection::RustConnection;
 
 use crate::{
-    ButtonId, CursorPosition, EventDisposition, ForegroundApp, HookBackend, HookError, HookEvent,
-    LOGITECH_VENDOR_ID, MouseEvent,
+    ButtonId, CursorPosition, EventDisposition, FocusedWindow, ForegroundApp, HookBackend,
+    HookError, HookEvent, LOGITECH_VENDOR_ID, MouseEvent,
 };
 
 /// Prefix carried by every uinput device OpenLogi creates — the hook's
@@ -132,6 +132,22 @@ impl HookBackend for Backend {
         FRONTMOST_SOURCE
             .frontmost_app_id()
             .map(ForegroundApp::unnamed)
+    }
+
+    /// Return everything the selected frontmost backend can read about the
+    /// focused window, plus the Steam AppID looked up from its pid.
+    fn focused_window() -> Option<FocusedWindow> {
+        FRONTMOST_SOURCE.focused_window().map(with_steam_app_id)
+    }
+
+    /// Subscribe to the selected frontmost backend's push source, when it has
+    /// one (only the gnome-shell backend does). Wraps `on_reading` so every
+    /// pushed reading also gets the Steam AppID lookup [`Self::focused_window`]
+    /// applies to polled readings.
+    fn watch_focus(on_reading: Box<dyn Fn(Option<FocusedWindow>) + Send + Sync>) -> bool {
+        FRONTMOST_SOURCE.watch(Box::new(move |window| {
+            on_reading(window.map(with_steam_app_id));
+        }))
     }
 
     /// Read the global cursor position through X11 when an X server is available.
@@ -540,6 +556,30 @@ fn device_thread(
 mod gnome_shell;
 mod wlr_foreign_toplevel;
 
+/// `SteamAppId=` from a NUL-separated environment block, laid out the way
+/// `/proc/<pid>/environ` is. Steam exports it to every game it launches, and a
+/// Proton game inherits it into the Wine process that owns the window.
+fn steam_app_id_in(environ: &[u8]) -> Option<u32> {
+    environ
+        .split(|byte| *byte == 0)
+        .find_map(|entry| entry.strip_prefix(b"SteamAppId="))
+        .and_then(|value| std::str::from_utf8(value).ok()?.parse().ok())
+}
+
+/// The Steam AppID of `pid`, when Steam launched it. The agent runs as the
+/// user, so its own games' environments are readable; anything else is `None`.
+fn steam_app_id_of(pid: u32) -> Option<u32> {
+    std::fs::read(format!("/proc/{pid}/environ"))
+        .ok()
+        .and_then(|environ| steam_app_id_in(&environ))
+}
+
+/// Fill `steam_app_id` from the pid, when the source reported one.
+fn with_steam_app_id(mut window: FocusedWindow) -> FocusedWindow {
+    window.steam_app_id = window.pid.and_then(steam_app_id_of);
+    window
+}
+
 /// A backend that reports which application is currently frontmost.
 ///
 /// Implementations are display-server / desktop specific. The string returned
@@ -558,6 +598,24 @@ trait FrontmostSource: Send + Sync {
     /// no frontmost window or it cannot be read.
     fn frontmost_app_id(&self) -> Option<String>;
 
+    /// The focused window with whatever else the backend can read. The
+    /// default is the identifier alone; backends that see a title or a pid
+    /// override it.
+    fn focused_window(&self) -> Option<FocusedWindow> {
+        self.frontmost_app_id()
+            .map(|id| FocusedWindow::app(ForegroundApp::unnamed(id)))
+    }
+
+    /// Subscribe to a push source of focus changes, when this backend has
+    /// one. `on_reading` is called on a backend-owned thread for as long as
+    /// the process lives. Returns `true` when a subscription was made; the
+    /// default is `false`, since most backends (X11, the null fallback) have
+    /// only the poll [`Self::focused_window`] answers.
+    fn watch(&self, on_reading: Box<dyn Fn(Option<FocusedWindow>) + Send + Sync>) -> bool {
+        let _ = on_reading;
+        false
+    }
+
     /// Short backend identifier, for diagnostics / logging only.
     fn name(&self) -> &'static str;
 }
@@ -570,10 +628,13 @@ struct X11Source {
     conn: RustConnection,
     root: Window,
     net_active_window: Atom,
+    net_wm_name: Atom,
+    utf8_string: Atom,
+    net_wm_pid: Atom,
 }
 
 impl X11Source {
-    /// Connect to the X server and resolve the `_NET_ACTIVE_WINDOW` atom.
+    /// Connect to the X server and resolve the atoms this backend reads.
     /// Returns `None` when no X display is reachable (a Wayland session without
     /// XWayland, or `$DISPLAY` unset).
     fn connect() -> Option<Self> {
@@ -587,17 +648,37 @@ impl X11Source {
             .reply()
             .ok()?
             .atom;
+        let net_wm_name = conn
+            .intern_atom(false, b"_NET_WM_NAME")
+            .ok()?
+            .reply()
+            .ok()?
+            .atom;
+        let utf8_string = conn
+            .intern_atom(false, b"UTF8_STRING")
+            .ok()?
+            .reply()
+            .ok()?
+            .atom;
+        let net_wm_pid = conn
+            .intern_atom(false, b"_NET_WM_PID")
+            .ok()?
+            .reply()
+            .ok()?
+            .atom;
         Some(Self {
             conn,
             root,
             net_active_window,
+            net_wm_name,
+            utf8_string,
+            net_wm_pid,
         })
     }
-}
 
-impl FrontmostSource for X11Source {
-    fn frontmost_app_id(&self) -> Option<String> {
-        // _NET_ACTIVE_WINDOW on the root window holds the focused window's XID.
+    /// The XID of the currently active window, from `_NET_ACTIVE_WINDOW` on the
+    /// root window. `None` when there is no active window.
+    fn active_window(&self) -> Option<Window> {
         let window: Window = self
             .conn
             .get_property(
@@ -613,13 +694,13 @@ impl FrontmostSource for X11Source {
             .ok()?
             .value32()?
             .next()?;
-        if window == 0 {
-            return None;
-        }
+        (window != 0).then_some(window)
+    }
 
-        // WM_CLASS is instance_name\0class_name\0; the class component is more
-        // stable across window instances and is what profiles should key on
-        // (e.g. "Firefox", not "Navigator").
+    /// The `WM_CLASS` class component of `window` (e.g. "Firefox", not the
+    /// instance name "Navigator") — more stable across instances of the same
+    /// app and what per-app profiles should key on.
+    fn wm_class_of(&self, window: Window) -> Option<String> {
         let wm = WmClass::get(&self.conn, window)
             .ok()?
             .reply_unchecked()
@@ -628,6 +709,50 @@ impl FrontmostSource for X11Source {
             .ok()
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
+    }
+
+    /// `_NET_WM_NAME` (UTF-8) of `window`, or `None` when absent or empty.
+    fn title_of(&self, window: Window) -> Option<String> {
+        let reply = self
+            .conn
+            .get_property(false, window, self.net_wm_name, self.utf8_string, 0, 1024)
+            .ok()?
+            .reply()
+            .ok()?;
+        String::from_utf8(reply.value)
+            .ok()
+            .filter(|t| !t.is_empty())
+    }
+
+    /// `_NET_WM_PID` of `window`, or `None` when absent or `0`.
+    fn pid_of(&self, window: Window) -> Option<u32> {
+        let pid = self
+            .conn
+            .get_property(false, window, self.net_wm_pid, AtomEnum::CARDINAL, 0, 1)
+            .ok()?
+            .reply()
+            .ok()?
+            .value32()?
+            .next()?;
+        (pid != 0).then_some(pid)
+    }
+}
+
+impl FrontmostSource for X11Source {
+    fn frontmost_app_id(&self) -> Option<String> {
+        let window = self.active_window()?;
+        self.wm_class_of(window)
+    }
+
+    fn focused_window(&self) -> Option<FocusedWindow> {
+        let window = self.active_window()?;
+        let class = self.wm_class_of(window)?;
+        Some(FocusedWindow {
+            app: ForegroundApp::unnamed(class),
+            title: self.title_of(window),
+            pid: self.pid_of(window),
+            steam_app_id: None,
+        })
     }
 
     fn name(&self) -> &'static str {
@@ -741,6 +866,17 @@ mod tests {
     use evdev::{EventType, InputEvent, KeyCode, RelativeAxisCode};
 
     use super::*;
+
+    // ── steam_app_id_in ──────────────────────────────────────────────────────
+
+    #[test]
+    fn steam_app_id_is_read_from_a_nul_separated_environ() {
+        let environ = b"HOME=/home/x\0SteamAppId=1599340\0SteamGameId=1599340\0";
+        assert_eq!(steam_app_id_in(environ), Some(1_599_340));
+        assert_eq!(steam_app_id_in(b"HOME=/home/x\0"), None);
+        assert_eq!(steam_app_id_in(b"SteamAppId=notanumber\0"), None);
+        assert_eq!(steam_app_id_in(b""), None);
+    }
 
     // ── key_to_button ────────────────────────────────────────────────────────
 

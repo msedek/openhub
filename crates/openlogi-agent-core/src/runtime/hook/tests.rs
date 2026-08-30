@@ -120,25 +120,73 @@ fn resolve_gesture_click_prefers_explicit_then_falls_back_to_default() {
 
 #[test]
 fn fail_open_press_pairs_release() {
-    let mut fail_open = HashSet::new();
+    let mut presses = HashMap::new();
     assert_eq!(
-        remapped_press_disposition(ButtonId::Back, true, &mut fail_open),
+        press_disposition(ButtonId::Back, true, &mut presses),
         EventDisposition::Suppress
     );
     assert_eq!(
-        remapped_release_disposition(ButtonId::Back, &mut fail_open),
+        release_disposition(ButtonId::Back, false, &mut presses),
         EventDisposition::Suppress
     );
     assert_eq!(
-        remapped_press_disposition(ButtonId::Forward, false, &mut fail_open),
+        press_disposition(ButtonId::Forward, false, &mut presses),
         EventDisposition::PassThrough
     );
     assert_eq!(
-        remapped_release_disposition(ButtonId::Forward, &mut fail_open),
+        release_disposition(ButtonId::Forward, false, &mut presses),
         EventDisposition::PassThrough
     );
     assert_eq!(
-        remapped_release_disposition(ButtonId::Forward, &mut fail_open),
+        release_disposition(ButtonId::Forward, false, &mut presses),
+        EventDisposition::Suppress,
+        "the press it paired with is spent"
+    );
+}
+
+#[test]
+fn a_passed_through_press_pairs_its_release_after_a_rebuild() {
+    // The G-Shift layer opening (or a profile switch) between a press and its
+    // release must not leave the desktop holding a button whose up never came.
+    let mut presses = HashMap::new();
+    assert_eq!(
+        press_disposition(ButtonId::Back, false, &mut presses),
+        EventDisposition::PassThrough
+    );
+    assert_eq!(
+        release_disposition(ButtonId::Back, false, &mut presses),
+        EventDisposition::PassThrough,
+        "the map suppresses this button now, but its press already reached the desktop"
+    );
+}
+
+#[test]
+fn a_suppressed_press_pairs_its_release_after_a_rebuild() {
+    // The mirror case: the layer closing mid-press must not let through a
+    // release for a down the app never saw.
+    let mut presses = HashMap::new();
+    assert_eq!(
+        press_disposition(ButtonId::Back, true, &mut presses),
+        EventDisposition::Suppress
+    );
+    assert_eq!(
+        release_disposition(ButtonId::Back, true, &mut presses),
+        EventDisposition::Suppress,
+        "the map passes this button through now, but its press was swallowed"
+    );
+}
+
+#[test]
+fn a_release_with_no_recorded_press_follows_the_current_map() {
+    // The hook started while the button was already down: there is no press to
+    // pair with, so the map is all there is to go on.
+    let mut presses = HashMap::new();
+    assert_eq!(
+        release_disposition(ButtonId::LeftClick, true, &mut presses),
+        EventDisposition::PassThrough
+    );
+    assert_eq!(
+        release_disposition(ButtonId::Back, false, &mut presses),
         EventDisposition::Suppress
     );
 }
@@ -182,6 +230,7 @@ fn rebound_horizontal_wheel_maps_to_thumbwheel_directions() {
             (ButtonId::ThumbwheelScrollDown, Action::PrevTab.into()),
         ]),
         gestures: BTreeMap::new(),
+        g_shift: BTreeMap::new(),
     };
     assert_eq!(
         rebound_thumbwheel_action(&maps, 1.0),
@@ -208,6 +257,7 @@ fn native_thumbwheel_scroll_stays_os_native() {
             ),
         ]),
         gestures: BTreeMap::new(),
+        g_shift: BTreeMap::new(),
     };
     assert_eq!(rebound_thumbwheel_action(&maps, 1.0), None);
     assert_eq!(rebound_thumbwheel_action(&maps, -1.0), None);
@@ -283,4 +333,125 @@ fn resolve_gesture_click_falls_back_when_click_is_absent() {
         resolve_gesture_click(&empty, ButtonId::Forward),
         default_binding(ButtonId::Forward)
     );
+}
+
+fn maps() -> HookMaps {
+    let mut bindings = BTreeMap::new();
+    bindings.insert(ButtonId::DpiToggle, Binding::Single(Action::GShift));
+    bindings.insert(ButtonId::Back, Binding::Single(Action::Copy));
+    bindings.insert(ButtonId::RightClick, Binding::Single(Action::RightClick));
+    let mut g_shift = BTreeMap::new();
+    g_shift.insert(ButtonId::RightClick, Binding::Single(Action::Paste));
+    HookMaps {
+        bindings,
+        gestures: BTreeMap::new(),
+        g_shift,
+    }
+}
+
+#[test]
+fn the_trigger_is_found_in_the_normal_layer_only() {
+    let maps = maps();
+    assert!(maps.is_trigger(ButtonId::DpiToggle));
+    assert!(!maps.is_trigger(ButtonId::Back));
+    assert!(!maps.is_trigger(ButtonId::RightClick));
+}
+
+#[test]
+fn a_shifted_lookup_falls_back_to_the_normal_layer() {
+    let maps = maps();
+    assert_eq!(
+        maps.resolve(ButtonId::RightClick, false),
+        Some(Binding::Single(Action::RightClick))
+    );
+    assert_eq!(
+        maps.resolve(ButtonId::RightClick, true),
+        Some(Binding::Single(Action::Paste))
+    );
+    assert_eq!(
+        maps.resolve(ButtonId::Back, true),
+        Some(Binding::Single(Action::Copy))
+    );
+}
+
+#[test]
+fn a_release_resolves_in_the_layer_its_press_used() {
+    // Press under G-Shift, release after the trigger let go: the release must
+    // still resolve shifted, or the press is suppressed and the release is
+    // not — an OS-level stuck button.
+    let mut shifted = HashSet::new();
+    assert!(press_layer(true, true, &mut shifted, ButtonId::RightClick));
+    assert!(press_layer(
+        false,
+        false,
+        &mut shifted,
+        ButtonId::RightClick
+    ));
+    assert!(
+        !press_layer(false, false, &mut shifted, ButtonId::RightClick),
+        "consumed"
+    );
+    assert!(!press_layer(true, false, &mut shifted, ButtonId::Back));
+    assert!(
+        !press_layer(false, true, &mut shifted, ButtonId::Back),
+        "pressed unshifted, released shifted"
+    );
+}
+
+#[test]
+fn the_trigger_on_the_primary_button_is_swallowed() {
+    // GShift is an explicit binding, so the left button's floor lets it be
+    // suppressed — a trigger that also clicks would be useless.
+    assert!(!binding_passes_through(
+        ButtonId::LeftClick,
+        &Binding::Single(Action::GShift)
+    ));
+}
+
+#[test]
+fn a_trigger_press_is_recognised_when_none_is_held() {
+    let mut held = None;
+    assert_eq!(
+        trigger_transition(true, true, &mut held, ButtonId::DpiToggle),
+        Some(true)
+    );
+    assert_eq!(held, Some(ButtonId::DpiToggle));
+}
+
+#[test]
+fn the_held_triggers_release_is_recognised_even_if_the_map_moved_on() {
+    // A config rebuild between press and release reassigned DpiToggle away
+    // from GShift — the release must still close the layer it opened.
+    let mut held = Some(ButtonId::DpiToggle);
+    assert_eq!(
+        trigger_transition(false, false, &mut held, ButtonId::DpiToggle),
+        Some(false)
+    );
+    assert_eq!(held, None);
+}
+
+#[test]
+fn a_second_trigger_press_while_one_is_held_is_an_ordinary_button() {
+    let mut held = Some(ButtonId::DpiToggle);
+    assert_eq!(
+        trigger_transition(true, true, &mut held, ButtonId::RightClick),
+        None
+    );
+    assert_eq!(
+        held,
+        Some(ButtonId::DpiToggle),
+        "the first trigger keeps it"
+    );
+}
+
+#[test]
+fn a_release_of_an_unheld_button_the_map_now_calls_trigger_is_ordinary() {
+    // RightClick was never the remembered trigger; a rebuild that just made
+    // it one must not let its release be mistaken for a trigger release.
+    let mut held = None;
+    assert_eq!(
+        trigger_transition(false, true, &mut held, ButtonId::RightClick),
+        None
+    );
+    assert_eq!(held, None);
 }

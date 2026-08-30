@@ -203,6 +203,14 @@ pub enum Action {
     ///
     /// [`Effect::AgentSide`]: crate::binding::Effect::AgentSide
     RunMacro(MacroId),
+
+    /// The G-Shift trigger. While the button carrying it is held, every other
+    /// button resolves to its `g_shift` assignment in the active profile.
+    ///
+    /// Not an action: the OS hook consumes it as a layer switch and it never
+    /// reaches a dispatcher. Anywhere it cannot mean that — the Actions Ring,
+    /// a keyboard key, a HID++-diverted button — it is inert.
+    GShift,
 }
 
 /// One step in a [`Action::Workflow`]. A workflow is a `Vec<WorkflowStep>`
@@ -254,6 +262,7 @@ macro_rules! for_each_unit_action {
             MiddleClick "Middle Click" Mouse Mouse,
             MouseBack "Back (Button 4)" Mouse MouseBack,
             MouseForward "Forward (Button 5)" Mouse MouseForward,
+            GShift "G-Shift" Mouse Layers,
             // Editing
             Copy "Copy" Editing Copy,
             Paste "Paste" Editing Paste,

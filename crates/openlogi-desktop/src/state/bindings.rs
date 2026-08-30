@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use gpui::App;
 use openlogi_core::binding::{Action, Binding, ButtonId, GestureDirection};
-use openlogi_core::bindings::{bindings_for, hidpp_gesture_maps_for, oshook_gestures_for};
+use openlogi_core::bindings::{
+    ActiveScope, bindings_for, hidpp_gesture_maps_for, oshook_gestures_for,
+};
 use openlogi_core::config::{Config, KeyTrigger};
 use tracing::debug;
 
@@ -68,8 +70,11 @@ impl BindingState {
     }
 
     fn refresh_device(&mut self, config: &Config, persistent_key: Option<&str>) {
-        let button_bindings =
-            bindings_for(config, persistent_key, self.editing_app(persistent_key));
+        let button_bindings = bindings_for(
+            config,
+            persistent_key,
+            &ActiveScope::for_app(self.editing_app(persistent_key)),
+        );
         let gesture_bindings = gesture_maps_for(config, persistent_key);
         self.button_bindings = button_bindings;
         self.gesture_bindings = gesture_bindings;
@@ -89,7 +94,11 @@ fn gesture_maps_for(
         return BTreeMap::new();
     };
     let mut maps = hidpp_gesture_maps_for(config, Some(key));
-    maps.extend(oshook_gestures_for(config, Some(key), None));
+    maps.extend(oshook_gestures_for(
+        config,
+        Some(key),
+        &ActiveScope::default(),
+    ));
     maps
 }
 

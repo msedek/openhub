@@ -4,7 +4,10 @@ use std::{assert_matches, fs};
 
 use super::*;
 use crate::binding::{default_binding, default_gesture_binding};
+use crate::bindings::ActiveScope;
 use crate::hid::{Dpi, SmartShiftAutoDisengage, SmartShiftThreshold, TunableTorque};
+use crate::profile::{Assignments, GameProfile, MatchRule, ProfileId};
+use ghub_macro::MacroId;
 
 fn write_and_read(config: &Config) -> Config {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -24,6 +27,109 @@ fn canonical_configuration_example_parses() {
     };
     assert_eq!(long_press.short(), &Action::ShowDesktop);
     assert_eq!(long_press.long(), &Action::MissionControl);
+}
+
+#[test]
+fn profiles_roundtrip_and_the_example_carries_one() {
+    let mut cfg = Config::default();
+    let mut profile = GameProfile {
+        name: "Lost Ark".into(),
+        icon: None,
+        matches: vec![MatchRule::WmClass("lostark.exe".into())],
+        assignments: Assignments::default(),
+    };
+    profile.assignments.normal.insert(
+        ButtonId::MiddleClick,
+        Action::RunMacro(MacroId("superspace".into())),
+    );
+    cfg.profiles
+        .insert(ProfileId("lost-ark".into()), profile.clone());
+    let restored = write_and_read(&cfg);
+    assert_eq!(
+        restored.profiles.get(&ProfileId("lost-ark".into())),
+        Some(&profile)
+    );
+
+    let body = include_str!("../../../../docs/config.example.toml");
+    let documented: Config = toml::from_str(body).expect("documented config must parse");
+    let example = documented
+        .profiles
+        .get(&ProfileId("lost-ark".into()))
+        .expect("the example documents one profile");
+    assert!(
+        example
+            .matches
+            .iter()
+            .any(|rule| matches!(rule, MatchRule::WmClass(_)))
+    );
+    assert!(
+        !example.assignments.g_shift.is_empty(),
+        "the example shows the G-Shift layer"
+    );
+}
+
+fn lost_ark(back: Action, shifted_right: Action) -> (ProfileId, GameProfile) {
+    let mut profile = GameProfile {
+        name: "Lost Ark".into(),
+        icon: None,
+        matches: vec![MatchRule::WmClass("lostark.exe".into())],
+        assignments: Assignments::default(),
+    };
+    profile.assignments.normal.insert(ButtonId::Back, back);
+    profile
+        .assignments
+        .g_shift
+        .insert(ButtonId::RightClick, shifted_right);
+    (ProfileId("lost-ark".into()), profile)
+}
+
+#[test]
+fn a_profile_overlays_the_per_app_overlay() {
+    let mut cfg = Config::default();
+    cfg.set_binding("m", ButtonId::Back, Action::BrowserBack.into());
+    cfg.set_per_app_binding("m", "lostark.exe", ButtonId::Back, Some(Action::Undo));
+    let (id, profile) = lost_ark(
+        Action::RunMacro(MacroId("hyper".into())),
+        Action::RightClick,
+    );
+    cfg.profiles.insert(id.clone(), profile);
+
+    let app_only = ActiveScope::for_app(Some("lostark.exe"));
+    assert_eq!(
+        cfg.effective_bindings_in("m", &app_only)
+            .get(&ButtonId::Back),
+        Some(&Binding::Single(Action::Undo))
+    );
+
+    let scope = ActiveScope {
+        app: Some("lostark.exe".into()),
+        profile: Some(id),
+    };
+    assert_eq!(
+        cfg.effective_bindings_in("m", &scope).get(&ButtonId::Back),
+        Some(&Binding::Single(Action::RunMacro(MacroId("hyper".into()))))
+    );
+    assert!(cfg.g_shift_layer(&app_only).is_empty());
+    assert_eq!(
+        cfg.g_shift_layer(&scope).get(&ButtonId::RightClick),
+        Some(&Binding::Single(Action::RightClick))
+    );
+}
+
+#[test]
+fn a_profile_applies_to_a_device_with_no_config_entry() {
+    let mut cfg = Config::default();
+    let (id, profile) = lost_ark(Action::Copy, Action::Paste);
+    cfg.profiles.insert(id.clone(), profile);
+    let scope = ActiveScope {
+        app: None,
+        profile: Some(id),
+    };
+    assert_eq!(
+        cfg.effective_bindings_in("never-seen", &scope)
+            .get(&ButtonId::Back),
+        Some(&Binding::Single(Action::Copy))
+    );
 }
 
 #[test]

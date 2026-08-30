@@ -34,7 +34,7 @@ be copied manually to the generated physical keys.
 
 ## Shape
 
-`schema_version` is required and currently `5`. `selected_device` is an
+`schema_version` is required and currently `6`. `selected_device` is an
 optional physical device key.
 
 `[app_settings]` contains application-wide preferences:
@@ -83,10 +83,26 @@ Common device fields are:
 `shift+command+f5`. Supported trigger modifiers are `shift`, `control`,
 `option`, and `command`; aliases such as `ctrl`, `alt`, and `cmd` are accepted.
 
+`[macros.<id>]` records a macro a `RunMacro` binding refers to by id: `id`,
+`name`, `steps` (a sequence of Linux input event codes — key/button down, up,
+tap, or a millisecond delay), and `repeat`, one of `Once`, `WhileHeld { interval_ms }`,
+or `Toggle { interval_ms }`.
+
+`[profiles.<id>]` is a per-game profile: `name`, an optional `icon` path, and
+`matches`, a list of rules tried strongest first — `WmClass` (case-insensitive),
+then `SteamAppId`, then `Title` (a regular expression against the window
+title) — any one of which activates the profile. `assignments.normal` and
+`assignments.g_shift` are button-to-action maps layered the same way device
+bindings are: `"None"` disables a button, and an unknown or unidentified
+focused window keeps whichever profile was last active rather than falling
+back to no profile. The `g_shift` layer only applies to buttons the OS input
+hook sees — primary buttons, middle, back, forward, and DPI — not to buttons
+captured over HID++; `normal` applies to both.
+
 ## Actions
 
 Action names are the serialized Rust variant names, including `Copy`,
-`BrowserBack`, `PlayPause`, `CycleDpiPresets`, and `ShowActionsRing`.
+`BrowserBack`, `PlayPause`, `CycleDpiPresets`, `GShift`, and `ShowActionsRing`.
 Payload actions use a one-key inline table:
 
 ```toml

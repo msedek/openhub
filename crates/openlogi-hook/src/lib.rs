@@ -27,7 +27,7 @@
 
 use std::cfg_select;
 
-pub use openlogi_core::app::ForegroundApp;
+pub use openlogi_core::app::{FocusedWindow, ForegroundApp};
 pub use openlogi_core::binding::ButtonId;
 pub use openlogi_core::scroll::ScrollDelta;
 
@@ -357,6 +357,22 @@ trait HookBackend {
         None
     }
 
+    /// See [`crate::focused_window`]. The default wraps [`Self::frontmost_app`],
+    /// so a platform that only reports the application gets a `FocusedWindow`
+    /// with every other field `None` for free; Linux overrides this to fill in
+    /// the title, pid, and Steam AppID its focus sources can read.
+    fn focused_window() -> Option<FocusedWindow> {
+        Self::frontmost_app().map(FocusedWindow::app)
+    }
+
+    /// See [`crate::watch_focus`]. `false` by default — every platform except
+    /// Linux with the GNOME Shell extension has no push source, so the caller
+    /// falls back to polling [`Self::focused_window`] alone.
+    fn watch_focus(on_reading: Box<dyn Fn(Option<FocusedWindow>) + Send + Sync>) -> bool {
+        let _ = on_reading;
+        false
+    }
+
     /// See [`crate::cursor_position`].
     fn cursor_position() -> Option<CursorPosition> {
         None
@@ -511,6 +527,37 @@ impl Hook {
 #[must_use]
 pub fn frontmost_application() -> Option<ForegroundApp> {
     Backend::frontmost_app()
+}
+
+/// Return everything the platform can read about the currently focused window.
+///
+/// [`FocusedWindow::app`] is exactly [`frontmost_application`]'s result. The
+/// extra fields — title, pid, Steam AppID — are the fallback chain a per-game
+/// profile uses when a launcher hides the real `WM_CLASS`: on Linux, X11 and
+/// the GNOME Shell extension report the title and pid, wlroots reports the
+/// title, and the pid (when known) is used to read `SteamAppId` out of
+/// `/proc/<pid>/environ`. macOS and Windows report the application alone.
+///
+/// `None` under the same conditions as [`frontmost_application`].
+#[must_use]
+pub fn focused_window() -> Option<FocusedWindow> {
+    Backend::focused_window()
+}
+
+/// Subscribe to focus-change push notifications, when the platform backend
+/// has one.
+///
+/// `on_reading` runs on a hook-owned background thread, once per pushed
+/// change, for as long as the process lives — there is no way to unsubscribe.
+/// Returns `true` when a push source was found and subscribed, `false`
+/// immediately when the platform has none (macOS, Windows, or a Linux session
+/// without the OpenLogi GNOME Shell extension installed and enabled). A
+/// caller that also polls [`focused_window`] should slow that poll down when
+/// this returns `true`, since the push path now carries every focus change
+/// and the poll is only a reconciliation safety net.
+#[must_use]
+pub fn watch_focus(on_reading: impl Fn(Option<FocusedWindow>) + Send + Sync + 'static) -> bool {
+    Backend::watch_focus(Box::new(on_reading))
 }
 
 /// Return the current global cursor position without installing an input hook.
