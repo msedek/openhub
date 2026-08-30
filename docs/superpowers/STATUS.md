@@ -34,15 +34,14 @@ in full.
 
 ## State of the branches
 
-| Branch | What it holds | Verified |
-|---|---|---|
-| `master` | README, design spec, plans, own brand assets, NOTICE | — |
-| `feat/own-device-art` — **PR #1** | GPL relicence, 67 Piper drawings, SVG rendering pipeline | 202 desktop tests, full local gate green |
-| `feat/gaming-device-recognition` — **PR #2** | Model table, `0x8100`, `diag onboard`, button capability | 1136 tests, verified against the real G703 |
-| `feat/macro-engine` | Macro model and executor | 17 tests, 75+ runs with no flake, cadence measured |
+Everything below is merged into `master`; no feature branch is open.
 
-Both pull requests are open and unmerged. Neither depends on the other; they
-touch different crates and merge in either order.
+| PR | What it delivered | Verified |
+|---|---|---|
+| **#1** `feat/own-device-art` | GPL relicence, 67 Piper drawings, SVG rendering pipeline | 202 desktop tests, full local gate green |
+| **#2** `feat/gaming-device-recognition` | Model table, `0x8100`, `diag onboard`, button capability | 1136 tests, verified against the real G703 |
+| **#3** `feat/macro-engine` | Macro model and executor, `Action::RunMacro`, widened suppression | 17 tests, 75+ runs with no flake, cadence measured |
+| **#4** `docs/hardware-verification` | The hardware measurements recorded below | — |
 
 ## What actually works today
 
@@ -91,10 +90,11 @@ recorder, G-Shift toggle).
 ## The plans, in order
 
 1. `plans/2026-08-28-gaming-device-recognition.md` — **done**, all five tasks.
-2. `plans/2026-08-28-macro-engine.md` — Tasks 1 and 2 done. **Tasks 3 and 4 are
-   in progress and may be half-applied in the working tree.** Task 5 is
-   hardware verification and needs a person with the mouse.
-3. Per-game profiles — not written yet. Spec §6 has the design.
+2. `plans/2026-08-28-macro-engine.md` — **done**, all five tasks; Task 5 is the
+   hardware verification recorded above.
+3. `plans/2026-08-30-game-profiles.md` — **next**. Per-game profiles: window
+   matching, the G-Shift layer, the level-triggered reconciliation in spec §6,
+   and the push path in the GNOME Shell extension.
 4. The GUI — not written yet. Spec §8 has the design.
 
 ## Facts measured against the hardware, which nothing should re-derive

@@ -16,10 +16,12 @@ Per-game profiles, macros, DPI and lighting for Logitech G gaming mice — no ac
 ---
 
 > [!WARNING]
-> **OpenHub is in early development and does not work yet.** The repository
-> currently holds the inherited OpenLogi codebase plus the design for the gaming
-> layer. Nothing described under "What OpenHub adds" is implemented. Watch the
-> repo if you want to know when that changes.
+> **OpenHub is in early development.** Gaming-mouse recognition (HID++
+> `0x8100`) and the macro engine — repeat-while-held, verified on real
+> hardware — are in. Per-game profiles, the G-Shift layer and every GUI
+> screen for the above are not: today a macro is bound by editing
+> `config.toml` by hand. `docs/superpowers/STATUS.md` says exactly where
+> things stand.
 
 ## Why this exists
 
