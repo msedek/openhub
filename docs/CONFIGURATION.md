@@ -93,14 +93,16 @@ or `Toggle { interval_ms }`.
 then `SteamAppId`, then `Title` (a regular expression against the window
 title) — any one of which activates the profile. `assignments.normal` and
 `assignments.g_shift` are button-to-action maps layered the same way device
-bindings are: `Action::None` disables a button, and an unknown or unidentified
+bindings are: `"None"` disables a button, and an unknown or unidentified
 focused window keeps whichever profile was last active rather than falling
-back to no profile.
+back to no profile. The `g_shift` layer only applies to buttons the OS input
+hook sees — primary buttons, middle, back, forward, and DPI — not to buttons
+captured over HID++; `normal` applies to both.
 
 ## Actions
 
 Action names are the serialized Rust variant names, including `Copy`,
-`BrowserBack`, `PlayPause`, `CycleDpiPresets`, and `ShowActionsRing`.
+`BrowserBack`, `PlayPause`, `CycleDpiPresets`, `GShift`, and `ShowActionsRing`.
 Payload actions use a one-key inline table:
 
 ```toml

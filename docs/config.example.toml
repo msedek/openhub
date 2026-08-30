@@ -132,7 +132,8 @@ DpiToggle = "GShift"
 RightClick = { RunMacro = "superright" }
 
 # Macros a RunMacro binding refers to by id. Steps are Linux input event
-# codes; `held_codes` are released on every exit, so a key is never left down.
+# codes; every code a run could leave down is released on every exit, so a
+# key is never left down.
 [macros.superspace]
 id = "superspace"
 name = "SuperSpace"

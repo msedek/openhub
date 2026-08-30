@@ -181,9 +181,12 @@ OpenLogi's `gnome_shell` frontmost backend uses it instead.
 
 The package installers (`.deb`/`.rpm`/`.pkg.tar.zst`) and `install.sh` place
 the extension in `/usr/share/gnome-shell/extensions/`, but GNOME Shell
-extensions are enabled per user, not system-wide. Enable it, then log out and
-back in (GNOME Shell only picks up a newly enabled extension on Wayland after
-a full session restart):
+extensions are enabled per user, not system-wide. The Nix flake does not ship
+the extension yet — copy
+`crates/openlogi-hook/gnome-shell-extension/openlogi-frontmost@openlogi.dev/`
+into `~/.local/share/gnome-shell/extensions/` by hand instead. Enable it, then
+log out and back in (GNOME Shell only picks up a newly enabled extension on
+Wayland after a full session restart):
 
 ```sh
 gnome-extensions enable openlogi-frontmost@openlogi.dev
