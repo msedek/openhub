@@ -5,6 +5,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -36,6 +37,28 @@ pub struct HookMaps {
     /// HID++ gesture button (0x00c3) uses the gesture watcher's separate map
     /// instead — it never reaches the OS hook.
     pub gestures: BTreeMap<ButtonId, BTreeMap<GestureDirection, Action>>,
+    /// The active profile's G-Shift layer: only the buttons it changes. Read
+    /// while [`G_SHIFT_HELD`] is set, falling back to `bindings`.
+    pub g_shift: BTreeMap<ButtonId, Binding>,
+}
+
+impl HookMaps {
+    /// Whether `id` is the G-Shift trigger. Looked up in the normal layer
+    /// only — a trigger inside the shifted layer would have no way to be
+    /// pressed.
+    #[must_use]
+    pub fn is_trigger(&self, id: ButtonId) -> bool {
+        self.bindings
+            .get(&id)
+            .is_some_and(|binding| binding.click_action() == Action::GShift)
+    }
+
+    /// The binding `id` resolves to in the given layer.
+    #[must_use]
+    pub fn resolve(&self, id: ButtonId, shifted: bool) -> Option<Binding> {
+        let layered = shifted.then(|| self.g_shift.get(&id)).flatten();
+        layered.or_else(|| self.bindings.get(&id)).cloned()
+    }
 }
 
 /// Shared, atomically-published [`HookMaps`], threaded between the config owner
@@ -164,6 +187,12 @@ impl HoldState {
     }
 }
 
+/// Whether the G-Shift trigger is held. One flag for the process, not per
+/// hook thread: the layer is a property of the user's hand, and on Linux the
+/// trigger and the buttons it modifies may arrive on different evdev threads
+/// (a receiver and a cable are two devices).
+static G_SHIFT_HELD: AtomicBool = AtomicBool::new(false);
+
 thread_local! {
     /// In-progress gesture hold, one instance per hook-callback thread: the
     /// single macOS tap thread, or — on Linux — one thread per device, so two
@@ -179,6 +208,28 @@ thread_local! {
     /// key-down events are auto-repeat, not replacement presses; their first
     /// matching key-up ends the lifecycle.
     static HELD_KEYS: RefCell<HashSet<u16>> = RefCell::new(HashSet::new());
+    /// Buttons whose press resolved in the shifted layer, so their release
+    /// resolves there too. Per thread, like `FAIL_OPEN_PRESSES`: a press and
+    /// its release come from the same device.
+    static SHIFTED_PRESSES: RefCell<HashSet<ButtonId>> = RefCell::new(HashSet::new());
+}
+
+/// The layer a press resolves in — and, for a release, the layer its press
+/// used, so the two dispositions always pair.
+fn press_layer(
+    pressed: bool,
+    held: bool,
+    shifted_presses: &mut HashSet<ButtonId>,
+    id: ButtonId,
+) -> bool {
+    if pressed {
+        if held {
+            shifted_presses.insert(id);
+        }
+        held
+    } else {
+        shifted_presses.remove(&id)
+    }
 }
 
 /// Whether a button event's physical source may be remapped/suppressed.
@@ -251,10 +302,27 @@ fn handle_button(
         return EventDisposition::PassThrough;
     }
 
+    // The trigger is consumed here: it is a layer switch, not an action, and
+    // it never reaches the dispatcher. `may_suppress` keeps the left-button
+    // floor honest — an explicit GShift binding is something bound.
+    if hooks.try_read().is_ok_and(|m| m.is_trigger(id)) {
+        G_SHIFT_HELD.store(pressed, Ordering::Release);
+        return if id.may_suppress(&Action::GShift) {
+            EventDisposition::Suppress
+        } else {
+            EventDisposition::PassThrough
+        };
+    }
+    let shifted = SHIFTED_PRESSES.with_borrow_mut(|presses| {
+        press_layer(pressed, G_SHIFT_HELD.load(Ordering::Acquire), presses, id)
+    });
+
     // `try_read` only: a blocking read on the tap thread freezes every pointer
     // event while a config rebuild holds the write lock. Fail open if unavailable.
     if pressed {
-        let is_gesture = hooks.try_read().is_ok_and(|m| m.gestures.contains_key(&id));
+        let is_gesture = hooks.try_read().is_ok_and(|m| {
+            m.gestures.contains_key(&id) && !(shifted && m.g_shift.contains_key(&id))
+        });
         // A refused begin — a second gesture button pressed mid-hold — falls
         // through to the single-action path: the first hold wins and this press
         // still means its plain click.
@@ -288,10 +356,7 @@ fn handle_button(
         }
     }
 
-    let binding = hooks
-        .try_read()
-        .ok()
-        .and_then(|m| m.bindings.get(&id).cloned());
+    let binding = hooks.try_read().ok().and_then(|m| m.resolve(id, shifted));
     let Some(binding) = binding else {
         return EventDisposition::PassThrough;
     };
@@ -477,6 +542,8 @@ pub fn start(
                 MouseEvent::CaptureInterrupted => {
                     HOLD.with_borrow_mut(HoldState::cancel);
                     HELD_KEYS.with_borrow_mut(HashSet::clear);
+                    G_SHIFT_HELD.store(false, Ordering::Release);
+                    SHIFTED_PRESSES.with_borrow_mut(HashSet::clear);
                     dispatcher.cancel_hook_thread_buttons();
                     scroll.cancel_hooks();
                     EventDisposition::PassThrough

@@ -16,7 +16,9 @@ use std::sync::{Arc, RwLock};
 
 use openlogi_core::app::{FocusedWindow, ForegroundApp};
 use openlogi_core::binding::{Action, Binding};
-use openlogi_core::bindings::{ActiveScope, button_bindings_for, oshook_gestures_for};
+use openlogi_core::bindings::{
+    ActiveScope, button_bindings_for, g_shift_bindings_for, oshook_gestures_for,
+};
 use openlogi_core::config::{Config, LightSettings, ScrollResolution};
 use openlogi_core::device::{
     Capabilities, DeviceInventory, DeviceKind, LightCapabilities, StandaloneDevice,
@@ -272,6 +274,7 @@ impl Orchestrator {
         HookMaps {
             bindings: button_bindings_for(&self.config, key, scope),
             gestures: oshook_gestures_for(&self.config, key, scope),
+            g_shift: g_shift_bindings_for(&self.config, scope),
         }
     }
 

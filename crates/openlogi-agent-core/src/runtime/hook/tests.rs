@@ -182,6 +182,7 @@ fn rebound_horizontal_wheel_maps_to_thumbwheel_directions() {
             (ButtonId::ThumbwheelScrollDown, Action::PrevTab.into()),
         ]),
         gestures: BTreeMap::new(),
+        g_shift: BTreeMap::new(),
     };
     assert_eq!(
         rebound_thumbwheel_action(&maps, 1.0),
@@ -208,6 +209,7 @@ fn native_thumbwheel_scroll_stays_os_native() {
             ),
         ]),
         gestures: BTreeMap::new(),
+        g_shift: BTreeMap::new(),
     };
     assert_eq!(rebound_thumbwheel_action(&maps, 1.0), None);
     assert_eq!(rebound_thumbwheel_action(&maps, -1.0), None);
@@ -283,4 +285,77 @@ fn resolve_gesture_click_falls_back_when_click_is_absent() {
         resolve_gesture_click(&empty, ButtonId::Forward),
         default_binding(ButtonId::Forward)
     );
+}
+
+fn maps() -> HookMaps {
+    let mut bindings = BTreeMap::new();
+    bindings.insert(ButtonId::DpiToggle, Binding::Single(Action::GShift));
+    bindings.insert(ButtonId::Back, Binding::Single(Action::Copy));
+    bindings.insert(ButtonId::RightClick, Binding::Single(Action::RightClick));
+    let mut g_shift = BTreeMap::new();
+    g_shift.insert(ButtonId::RightClick, Binding::Single(Action::Paste));
+    HookMaps {
+        bindings,
+        gestures: BTreeMap::new(),
+        g_shift,
+    }
+}
+
+#[test]
+fn the_trigger_is_found_in_the_normal_layer_only() {
+    let maps = maps();
+    assert!(maps.is_trigger(ButtonId::DpiToggle));
+    assert!(!maps.is_trigger(ButtonId::Back));
+    assert!(!maps.is_trigger(ButtonId::RightClick));
+}
+
+#[test]
+fn a_shifted_lookup_falls_back_to_the_normal_layer() {
+    let maps = maps();
+    assert_eq!(
+        maps.resolve(ButtonId::RightClick, false),
+        Some(Binding::Single(Action::RightClick))
+    );
+    assert_eq!(
+        maps.resolve(ButtonId::RightClick, true),
+        Some(Binding::Single(Action::Paste))
+    );
+    assert_eq!(
+        maps.resolve(ButtonId::Back, true),
+        Some(Binding::Single(Action::Copy))
+    );
+}
+
+#[test]
+fn a_release_resolves_in_the_layer_its_press_used() {
+    // Press under G-Shift, release after the trigger let go: the release must
+    // still resolve shifted, or the press is suppressed and the release is
+    // not — an OS-level stuck button.
+    let mut shifted = HashSet::new();
+    assert!(press_layer(true, true, &mut shifted, ButtonId::RightClick));
+    assert!(press_layer(
+        false,
+        false,
+        &mut shifted,
+        ButtonId::RightClick
+    ));
+    assert!(
+        !press_layer(false, false, &mut shifted, ButtonId::RightClick),
+        "consumed"
+    );
+    assert!(!press_layer(true, false, &mut shifted, ButtonId::Back));
+    assert!(
+        !press_layer(false, true, &mut shifted, ButtonId::Back),
+        "pressed unshifted, released shifted"
+    );
+}
+
+#[test]
+fn the_trigger_on_the_primary_button_is_swallowed() {
+    // GShift is an explicit binding, so the left button's floor lets it be
+    // suppressed — a trigger that also clicks would be useless.
+    assert!(!binding_passes_through(
+        ButtonId::LeftClick,
+        &Binding::Single(Action::GShift)
+    ));
 }
