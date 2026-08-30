@@ -359,3 +359,51 @@ fn the_trigger_on_the_primary_button_is_swallowed() {
         &Binding::Single(Action::GShift)
     ));
 }
+
+#[test]
+fn a_trigger_press_is_recognised_when_none_is_held() {
+    let mut held = None;
+    assert_eq!(
+        trigger_transition(true, true, &mut held, ButtonId::DpiToggle),
+        Some(true)
+    );
+    assert_eq!(held, Some(ButtonId::DpiToggle));
+}
+
+#[test]
+fn the_held_triggers_release_is_recognised_even_if_the_map_moved_on() {
+    // A config rebuild between press and release reassigned DpiToggle away
+    // from GShift — the release must still close the layer it opened.
+    let mut held = Some(ButtonId::DpiToggle);
+    assert_eq!(
+        trigger_transition(false, false, &mut held, ButtonId::DpiToggle),
+        Some(false)
+    );
+    assert_eq!(held, None);
+}
+
+#[test]
+fn a_second_trigger_press_while_one_is_held_is_an_ordinary_button() {
+    let mut held = Some(ButtonId::DpiToggle);
+    assert_eq!(
+        trigger_transition(true, true, &mut held, ButtonId::RightClick),
+        None
+    );
+    assert_eq!(
+        held,
+        Some(ButtonId::DpiToggle),
+        "the first trigger keeps it"
+    );
+}
+
+#[test]
+fn a_release_of_an_unheld_button_the_map_now_calls_trigger_is_ordinary() {
+    // RightClick was never the remembered trigger; a rebuild that just made
+    // it one must not let its release be mistaken for a trigger release.
+    let mut held = None;
+    assert_eq!(
+        trigger_transition(false, true, &mut held, ButtonId::RightClick),
+        None
+    );
+    assert_eq!(held, None);
+}

@@ -3,7 +3,7 @@
 //! Installs the platform hook lazily, reads atomically published button maps,
 //! and converts callback-thread mouse/key input into the shared action runtime.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -38,7 +38,7 @@ pub struct HookMaps {
     /// instead — it never reaches the OS hook.
     pub gestures: BTreeMap<ButtonId, BTreeMap<GestureDirection, Action>>,
     /// The active profile's G-Shift layer: only the buttons it changes. Read
-    /// while [`G_SHIFT_HELD`] is set, falling back to `bindings`.
+    /// while `G_SHIFT_HELD` is set, falling back to `bindings`.
     pub g_shift: BTreeMap<ButtonId, Binding>,
 }
 
@@ -212,6 +212,12 @@ thread_local! {
     /// resolves there too. Per thread, like `FAIL_OPEN_PRESSES`: a press and
     /// its release come from the same device.
     static SHIFTED_PRESSES: RefCell<HashSet<ButtonId>> = RefCell::new(HashSet::new());
+    /// The physical button whose press set `G_SHIFT_HELD`, remembered so its
+    /// release always clears the flag — even if a config rebuild between the
+    /// press and the release changed what `id` is bound to. `Cell` (not
+    /// `RefCell`) suffices: a button's press and its release arrive on the
+    /// same device thread, one at a time.
+    static TRIGGER_HELD: Cell<Option<ButtonId>> = const { Cell::new(None) };
 }
 
 /// The layer a press resolves in — and, for a release, the layer its press
@@ -229,6 +235,37 @@ fn press_layer(
         held
     } else {
         shifted_presses.remove(&id)
+    }
+}
+
+/// Whether this button event is a G-Shift trigger edge, and if so the new
+/// value for `G_SHIFT_HELD`.
+///
+/// A press is the trigger only when the current map says so *and* no trigger
+/// is already held — a second trigger press while one is down is an ordinary
+/// button in the shifted layer, not a nested layer switch. A release is the
+/// trigger only when it matches the physical button `held` remembers, so a
+/// config rebuild between a press and its release can never re-decide which
+/// layer the release belongs to (leaving the flag stuck, or the release
+/// falling through as an ordinary — undispatched — button).
+fn trigger_transition(
+    pressed: bool,
+    is_trigger_now: bool,
+    held: &mut Option<ButtonId>,
+    id: ButtonId,
+) -> Option<bool> {
+    if pressed {
+        if is_trigger_now && held.is_none() {
+            *held = Some(id);
+            Some(true)
+        } else {
+            None
+        }
+    } else if *held == Some(id) {
+        *held = None;
+        Some(false)
+    } else {
+        None
     }
 }
 
@@ -305,8 +342,25 @@ fn handle_button(
     // The trigger is consumed here: it is a layer switch, not an action, and
     // it never reaches the dispatcher. `may_suppress` keeps the left-button
     // floor honest — an explicit GShift binding is something bound.
-    if hooks.try_read().is_ok_and(|m| m.is_trigger(id)) {
-        G_SHIFT_HELD.store(pressed, Ordering::Release);
+    // `TRIGGER_HELD` pins which physical button opened the layer, so its
+    // release always closes it even if a config rebuild between the two
+    // events changed what `id` is now bound to.
+    let is_trigger_now = hooks.try_read().is_ok_and(|m| m.is_trigger(id));
+    let trigger_edge = TRIGGER_HELD.with(|held| {
+        let mut current = held.get();
+        let edge = trigger_transition(pressed, is_trigger_now, &mut current, id);
+        held.set(current);
+        edge
+    });
+    if let Some(new_flag) = trigger_edge {
+        G_SHIFT_HELD.store(new_flag, Ordering::Release);
+        if new_flag {
+            // A stranded shifted-press entry (from before this button became
+            // the trigger) must not survive to mispair a later release.
+            SHIFTED_PRESSES.with_borrow_mut(|presses| {
+                presses.remove(&id);
+            });
+        }
         return if id.may_suppress(&Action::GShift) {
             EventDisposition::Suppress
         } else {
@@ -544,6 +598,7 @@ pub fn start(
                     HELD_KEYS.with_borrow_mut(HashSet::clear);
                     G_SHIFT_HELD.store(false, Ordering::Release);
                     SHIFTED_PRESSES.with_borrow_mut(HashSet::clear);
+                    TRIGGER_HELD.with(|held| held.set(None));
                     dispatcher.cancel_hook_thread_buttons();
                     scroll.cancel_hooks();
                     EventDisposition::PassThrough
