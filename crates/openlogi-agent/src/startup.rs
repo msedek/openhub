@@ -200,7 +200,7 @@ pub(crate) enum WatcherEvent {
     Inventory(watchers::inventory::InventoryEvent),
     /// Camera activity flipped.
     Camera(bool),
-    App(watchers::foreground_app::ForegroundUpdate),
+    App(watchers::foreground_app::FocusReading),
     /// The Accessibility grant flipped.
     Accessibility(bool),
     /// The Input Monitoring grant flipped.

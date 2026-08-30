@@ -20,6 +20,7 @@ use openlogi_core::hid::{
     DeviceRoute, Dpi, DpiInfo, LightCommand, PairingError, PasskeyMethod, ReceiverSelector,
     SmartShiftStatus, WriteError,
 };
+use openlogi_core::profile::ProfileId;
 use serde::{Deserialize, Serialize};
 pub use succession::Identity;
 
@@ -62,7 +63,9 @@ pub use succession::Identity;
 /// v29: `Agent::declare_client` + [`ClientKind`] appended — typed demand for
 ///      the macOS dormancy gate.
 /// v31: `Action::GShift` appended — the per-game profile layer trigger.
-pub const PROTOCOL_VERSION: u32 = 31;
+/// v32: `AgentSnapshot::active_profile` appended — the per-game profile the
+///      agent applied.
+pub const PROTOCOL_VERSION: u32 = 32;
 
 /// Environment variable through which the agent hands a supervised helper the
 /// run token it will serve, so the helper knows which agent it belongs to
@@ -139,6 +142,11 @@ pub struct AgentSnapshot {
     /// Which application per-app profiles are resolving against. See
     /// [`ForegroundApps`].
     pub foreground: ForegroundApps,
+    /// The per-game profile currently applied, or `None` when the focused
+    /// window matches none. A client cannot re-run the matcher itself — it has
+    /// no title or Steam AppID — so this is the only way it learns which
+    /// profile, if any, is live.
+    pub active_profile: Option<ProfileId>,
 }
 
 /// The application the agent currently resolves per-app profiles against, and

@@ -1,31 +1,39 @@
-//! Foreground application polling watcher.
+//! Focused-window polling watcher.
 
 use std::time::Duration;
 
-use openlogi_core::app::ForegroundApp;
+use openlogi_core::app::FocusedWindow;
 use tokio::sync::mpsc;
 
 use super::poll::{self, Poll};
 
-/// Channel item: `Some(app)` when an app is frontmost; `None` for "no
-/// foreground app" (rare on macOS — Finder is usually frontmost even when
-/// nothing else is).
-pub type ForegroundUpdate = Option<ForegroundApp>;
+/// Channel item: the window the platform reports as focused right now, or
+/// `None` when the reading is unknown — no window is frontmost, or the
+/// platform cannot say. It is never "no window": the orchestrator's reconciler
+/// treats `None` as unknown and keeps the last identifiable window (spec §6).
+pub type FocusReading = Option<FocusedWindow>;
 
-/// Watch foreground application changes.
-pub fn spawn(period: Duration) -> mpsc::UnboundedReceiver<ForegroundUpdate> {
+/// Report the focused window every `period`, changed or not.
+///
+/// The consumer reconciles by level (spec §6): it compares the profile that
+/// should be applied against the one that is, on every reading, so a missed
+/// edge corrects itself a period later instead of waiting for the user to
+/// alt-tab twice.
+pub fn spawn(period: Duration) -> mpsc::UnboundedReceiver<FocusReading> {
     if !cfg!(any(
         target_os = "macos",
         target_os = "linux",
         target_os = "windows"
     )) {
-        // No way to read the frontmost app, so per-app profiles never switch.
+        // No way to read the frontmost window, so per-game profiles never switch.
         return poll::never();
     }
+    let (tx, rx) = mpsc::unbounded_channel();
     Poll {
-        name: "openlogi-app-watcher",
+        name: "openlogi-focus-watcher",
         period,
-        degrades: "per-app profiles are disabled",
+        degrades: "per-game profiles are disabled",
     }
-    .on_change(openlogi_hook::frontmost_application)
+    .every_into(tx, openlogi_hook::focused_window);
+    rx
 }

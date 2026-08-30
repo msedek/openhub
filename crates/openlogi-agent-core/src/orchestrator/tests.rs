@@ -5,7 +5,8 @@ use super::{
     any_device_needs_capture_rearm, build_devices, configured_wheel_mode, host_switch_links,
     pick_current, plan_reapply, reapply_targets, stable_id,
 };
-use openlogi_core::app::ForegroundApp;
+use ghub_macro::MacroId;
+use openlogi_core::app::{FocusedWindow, ForegroundApp};
 use openlogi_core::binding::{Action, Binding, ButtonId};
 use openlogi_core::config::{
     Config, DeviceConfig, LightSettings, LinkConfig, ScrollResolution, VerticalScrollSensitivity,
@@ -16,6 +17,7 @@ use openlogi_core::device::{
 };
 use openlogi_core::device_order::{DeviceIdentity, DeviceStableId};
 use openlogi_core::hid::Dpi;
+use openlogi_core::profile::{Assignments, GameProfile, MatchRule, ProfileId};
 use openlogi_hid::{DIRECT_DEVICE_INDEX, DeviceRoute};
 use std::sync::Arc;
 
@@ -901,4 +903,88 @@ fn app_switch_republishes_capture_plans() {
     );
     orch.set_current_app(Some(ForegroundApp::unnamed("com.example.editor".into())));
     assert_eq!(published_back_binding(&orch), Some(Action::Undo));
+}
+
+fn lost_ark_config() -> Config {
+    let mut config = Config::default();
+    let mut profile = GameProfile {
+        name: "Lost Ark".into(),
+        icon: None,
+        matches: vec![
+            MatchRule::WmClass("lostark.exe".into()),
+            MatchRule::Title("^LOST ARK".into()),
+        ],
+        assignments: Assignments::default(),
+    };
+    profile
+        .assignments
+        .normal
+        .insert(ButtonId::Back, Action::RunMacro(MacroId("hyper".into())));
+    config
+        .profiles
+        .insert(ProfileId("lost-ark".into()), profile);
+    config
+}
+
+// Not `Option<FocusedWindow>` / `Option<Action>`: every call site already
+// wraps a reading or an expected binding in `Some`, and clippy's
+// `unnecessary_wraps` (denied workspace-wide) rejects a helper that always
+// returns `Some`.
+fn focus(app_id: &str) -> FocusedWindow {
+    FocusedWindow::app(ForegroundApp::unnamed(app_id.into()))
+}
+
+fn hyper() -> Action {
+    Action::RunMacro(MacroId("hyper".into()))
+}
+
+#[test]
+fn an_unknown_focus_keeps_the_applied_profile() {
+    let mut orch = orchestrator(lost_ark_config());
+    orch.devices = vec![dev("a", 1, true)];
+    orch.rebuild();
+    assert!(orch.reconcile_focus(Some(focus("lostark.exe"))));
+    assert_eq!(published_back_binding(&orch), Some(hyper()));
+
+    // Reading failed, or the desktop is in front: nothing identifiable took focus.
+    assert!(!orch.reconcile_focus(None), "unknown is not a change");
+    assert_eq!(published_back_binding(&orch), Some(hyper()));
+
+    assert!(orch.reconcile_focus(Some(focus("org.gnome.Nautilus"))));
+    assert_ne!(published_back_binding(&orch), Some(hyper()));
+}
+
+#[test]
+fn a_repeated_reading_is_a_no_op() {
+    // The watcher reports every tick; a hold on the G-Shift trigger across a
+    // tick must not be cancelled by a reconcile that changed nothing.
+    let mut orch = orchestrator(lost_ark_config());
+    orch.devices = vec![dev("a", 1, true)];
+    orch.rebuild();
+    assert!(orch.reconcile_focus(Some(focus("lostark.exe"))));
+    assert!(!orch.reconcile_focus(Some(focus("lostark.exe"))));
+}
+
+#[test]
+fn a_title_rule_matches_when_the_class_is_unknown() {
+    let mut orch = orchestrator(lost_ark_config());
+    orch.devices = vec![dev("a", 1, true)];
+    orch.rebuild();
+    let mut window = FocusedWindow::app(ForegroundApp::unnamed("steam_app_1599340".into()));
+    window.title = Some("LOST ARK".into());
+    assert!(orch.reconcile_focus(Some(window)));
+    assert_eq!(published_back_binding(&orch), Some(hyper()));
+}
+
+#[test]
+fn a_config_reload_reevaluates_the_last_window() {
+    // Level-triggered: the profile was added while the game already had
+    // focus. No new reading arrives — the reload alone must apply it.
+    let mut orch = orchestrator(Config::default());
+    orch.devices = vec![dev("a", 1, true)];
+    orch.rebuild();
+    orch.reconcile_focus(Some(focus("lostark.exe")));
+    assert_ne!(published_back_binding(&orch), Some(hyper()));
+    orch.reload_config(lost_ark_config());
+    assert_eq!(published_back_binding(&orch), Some(hyper()));
 }

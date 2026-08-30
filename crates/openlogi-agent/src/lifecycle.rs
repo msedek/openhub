@@ -28,7 +28,7 @@ use openlogi_agent_core::event_monitor::EventMonitor;
 use openlogi_agent_core::observable::ObservableState;
 use openlogi_agent_core::orchestrator::{Orchestrator, SharedRuntime};
 use openlogi_agent_core::runtime::hook;
-use openlogi_agent_core::watchers::foreground_app::ForegroundUpdate;
+use openlogi_agent_core::watchers::foreground_app::FocusReading;
 use openlogi_agent_core::watchers::inventory::InventoryEvent;
 use openlogi_core::config::Config;
 use openlogi_hook::Hook;
@@ -338,10 +338,11 @@ impl Armed {
         }
     }
 
-    /// Publish one foreground-app change and cancel button lifecycles whose
-    /// bindings were resolved against the previous app profile.
-    async fn apply_foreground(&self, app: ForegroundUpdate) {
-        if self.orchestrator.lock().await.set_current_app(app) {
+    /// Feed one focus reading to the reconciler and, when the applied scope
+    /// changed, cancel every press lifecycle resolved against the old one —
+    /// which also stops every running macro (`MacroRunner::stop_all`).
+    async fn apply_foreground(&self, reading: FocusReading) {
+        if self.orchestrator.lock().await.reconcile_focus(reading) {
             self.inputs.dispatcher.cancel_all_buttons();
         }
     }

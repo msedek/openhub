@@ -43,6 +43,7 @@ use openlogi_core::hid::{
     LightCommand, PasskeyMethod, ReceiverSelector, SmartShiftAutoDisengage, SmartShiftMode,
     SmartShiftStatus, SmartShiftThreshold, TunableTorque, WriteError,
 };
+use openlogi_core::profile::ProfileId;
 use openlogi_ipc::{
     ActionRingCommandError, ActionRingInvocation, ActionRingPresentation, AgentRequest,
     AgentSnapshot, AgentStatus, ClientKind, ConfigReloadError, ForegroundApps, FoundDevice,
@@ -101,7 +102,7 @@ fn representative_smartshift_status() -> SmartShiftStatus {
 /// that makes that visible in the same diff.
 #[test]
 fn protocol_version_is_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 31);
+    assert_eq!(PROTOCOL_VERSION, 32);
 }
 
 #[test]
@@ -319,15 +320,26 @@ fn agent_snapshot() {
         // Pinned on its own in `foreground_apps` below, like the inventory and
         // pairing fields.
         foreground: ForegroundApps::default(),
+        // Pinned on its own in `active_profile` below.
+        active_profile: None,
     };
-    assert_wire(&snapshot, "010001010705302e362e360100000000000000");
+    assert_wire(&snapshot, "010001010705302e362e36010000000000000000");
 
     // The observation is the snapshot with its generation in front.
     let observed = Observation {
         generation: 3,
         snapshot,
     };
-    assert_wire(&observed, "03010001010705302e362e360100000000000000");
+    assert_wire(&observed, "03010001010705302e362e36010000000000000000");
+}
+
+/// The applied per-game profile rides the snapshot so a client can show which
+/// one is active without re-running the matcher it cannot run (it has no
+/// title or Steam AppID).
+#[test]
+fn active_profile() {
+    assert_wire(&None::<ProfileId>, "00");
+    assert_wire(&Some(ProfileId("lost-ark".into())), "01086c6f73742d61726b");
 }
 
 /// The foreground application rides the snapshot, so both halves are pinned:
