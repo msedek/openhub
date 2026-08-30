@@ -4,15 +4,15 @@
 //! pressed — but only once something calls `stop`. This module is the thing
 //! that calls it. A run left orphaned by a path nobody considered is a key held
 //! forever, which the user experiences as their desktop breaking for no reason,
-//! so every way a run can end routes through [`MacroRunner`]:
+//! so every way a run can end routes through `MacroRunner`:
 //!
 //! - the physical release, and every other terminal outcome of the press that
 //!   started it — a lost release, a stale hold, a cancelled capture source, an
 //!   invalidated generation, shutdown — arrive as one `Ended` event and land in
-//!   [`MacroRunner::end_press`];
+//!   `MacroRunner::end_press`;
 //! - a `Toggle` macro, which by definition outlives its press, is stopped by
-//!   the next press of the same control, by [`MacroRunner::stop_source`] when
-//!   its capture source goes away, and by [`MacroRunner::stop_all`] on a
+//!   the next press of the same control, by `MacroRunner::stop_source` when
+//!   its capture source goes away, and by `MacroRunner::stop_all` on a
 //!   binding or profile change, a config reload, and agent shutdown;
 //! - and if all of that were somehow missed, dropping the runner drops every
 //!   `RunHandle`, whose own `Drop` stops and joins the run.
