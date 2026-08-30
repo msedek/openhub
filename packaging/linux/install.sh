@@ -2,8 +2,8 @@
 # OpenLogi Linux install script.
 #
 # Installs the four OpenLogi executables plus udev rules, the systemd user-unit
-# template, the .desktop launcher, and the app icon. Requires sudo for the
-# system-wide paths.
+# template, the GNOME Shell extension, the .desktop launcher, and the app icon.
+# Requires sudo for the system-wide paths.
 #
 # Usage:
 #   ./install.sh [--prefix PREFIX]   (default PREFIX=/usr/local)
@@ -50,6 +50,7 @@ The script installs:
   PREFIX/bin/openlogi-agent
   /etc/udev/rules.d/70-openlogi.rules
   /usr/lib/systemd/user/openlogi-agent.service  (if systemd is present)
+  /usr/share/gnome-shell/extensions/openlogi-frontmost@openlogi.dev/
   /usr/share/applications/openlogi.desktop
   /usr/share/icons/hicolor/<size>/apps/openlogi.png  (16 … 1024)
 EOF
@@ -80,6 +81,22 @@ sudo install -Dm755 "${BUILD_DIR}/openlogi" "${BINDIR}/openlogi"
 sudo install -Dm755 "${BUILD_DIR}/openlogi-desktop" "${BINDIR}/openlogi-desktop"
 sudo install -Dm755 "${BUILD_DIR}/openlogi-overlay" "${BINDIR}/openlogi-overlay"
 sudo install -Dm755 "${BUILD_DIR}/openlogi-agent" "${BINDIR}/openlogi-agent"
+
+# ── GNOME Shell extension ─────────────────────────────────────────────────────
+
+# Required for per-game profiles on GNOME Wayland: the focused window is not
+# visible to ordinary clients there. System-wide install; each user still
+# enables it.
+GNOME_EXT_DIR="${REPO_ROOT}/crates/openlogi-hook/gnome-shell-extension/openlogi-frontmost@openlogi.dev"
+if [ -d "$GNOME_EXT_DIR" ]; then
+  echo "Installing GNOME Shell extension …"
+  sudo install -Dm644 "${GNOME_EXT_DIR}/extension.js" \
+    /usr/share/gnome-shell/extensions/openlogi-frontmost@openlogi.dev/extension.js
+  sudo install -Dm644 "${GNOME_EXT_DIR}/metadata.json" \
+    /usr/share/gnome-shell/extensions/openlogi-frontmost@openlogi.dev/metadata.json
+  echo "Enable it for per-game profiles on GNOME Wayland with:"
+  echo "  gnome-extensions enable openlogi-frontmost@openlogi.dev"
+fi
 
 # ── udev rules ────────────────────────────────────────────────────────────────
 

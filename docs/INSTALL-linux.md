@@ -167,6 +167,43 @@ Alternatively, toggle **Settings → General → Launch at login** in the GUI �
 writes the unit to `~/.config/systemd/user/openlogi-agent.service`
 automatically.
 
+## Per-game profiles on GNOME Wayland
+
+On GNOME running Wayland, Mutter does not expose the focused window to
+ordinary D-Bus clients — unlike X11, where a `WM_CLASS` lookup works
+directly, and unlike wlroots compositors (Sway, Hyprland, …), which already
+expose the focused view through their own protocols. The obvious workaround,
+calling `org.gnome.Shell`'s `Eval` or `Introspect` methods, is denied outright
+on GNOME 50. So per-game profile switching on GNOME Wayland needs the bundled
+`openlogi-frontmost@openlogi.dev` GNOME Shell extension: it exports a tiny
+D-Bus service that reports the focused window's `WM_CLASS`, title and pid, and
+OpenLogi's `gnome_shell` frontmost backend uses it instead.
+
+The package installers (`.deb`/`.rpm`/`.pkg.tar.zst`) and `install.sh` place
+the extension in `/usr/share/gnome-shell/extensions/`, but GNOME Shell
+extensions are enabled per user, not system-wide. Enable it, then log out and
+back in (GNOME Shell only picks up a newly enabled extension on Wayland after
+a full session restart):
+
+```sh
+gnome-extensions enable openlogi-frontmost@openlogi.dev
+# Log out and back in.
+```
+
+Check that it is running:
+
+```sh
+busctl --user call org.openlogi.Frontmost /org/openlogi/Frontmost \
+  org.openlogi.Frontmost GetFocusedWindow
+```
+
+A successful call returns the focused window's `WM_CLASS`, title and pid. If
+it errors with `org.freedesktop.DBus.Error.ServiceUnknown`, the extension is
+not enabled, or the session has not been restarted since enabling it.
+
+wlroots compositors and X11 sessions need none of this — OpenLogi reads the
+focused window directly there.
+
 ## Verify the installation
 
 ```sh
@@ -181,5 +218,5 @@ openlogi-desktop
 
 | Limitation | Status |
 |---|---|
-| Wayland: per-application profile switching | Requires XWayland (`WM_CLASS` lookup uses X11) |
+| GNOME Wayland: profile switching | Needs the OpenLogi Shell extension (see above) |
 | Button capture: middle / mode-shift / thumbwheel | Side buttons only today |
