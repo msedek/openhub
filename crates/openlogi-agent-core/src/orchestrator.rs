@@ -16,7 +16,7 @@ use std::sync::{Arc, RwLock};
 
 use openlogi_core::app::ForegroundApp;
 use openlogi_core::binding::{Action, Binding};
-use openlogi_core::bindings::{button_bindings_for, oshook_gestures_for};
+use openlogi_core::bindings::{ActiveScope, button_bindings_for, oshook_gestures_for};
 use openlogi_core::config::{Config, LightSettings, ScrollResolution};
 use openlogi_core::device::{
     Capabilities, DeviceInventory, DeviceKind, LightCapabilities, StandaloneDevice,
@@ -250,11 +250,11 @@ impl Orchestrator {
             .map(|d| d.config_key.as_str())
     }
 
-    /// Build the OS-hook callback's maps for `key` + foreground `app`. Both hook
-    /// sub-maps are app-scoped (a per-app override can demote the gesture owner),
+    /// Build the OS-hook callback's maps for `key` + `scope`. Both hook
+    /// sub-maps are scope-aware (a per-app override can demote the gesture owner),
     /// so they're built together here and published under one lock — keeping
     /// `rebuild` and `set_current_app` from drifting into a half-populated write.
-    fn hook_maps_for(&self, key: Option<&str>, app: Option<&str>) -> HookMaps {
+    fn hook_maps_for(&self, key: Option<&str>, scope: &ActiveScope) -> HookMaps {
         // A disabled selected device gets empty maps: the OS hook then passes
         // its events through untouched instead of applying remaps to a device
         // the user asked OpenLogi to leave alone.
@@ -262,8 +262,16 @@ impl Orchestrator {
             return HookMaps::default();
         }
         HookMaps {
-            bindings: button_bindings_for(&self.config, key, app),
-            gestures: oshook_gestures_for(&self.config, key, app),
+            bindings: button_bindings_for(&self.config, key, scope),
+            gestures: oshook_gestures_for(&self.config, key, scope),
+        }
+    }
+
+    /// What the hook maps and capture plans are resolved against right now.
+    fn scope(&self) -> ActiveScope {
+        ActiveScope {
+            app: self.current_app.clone(),
+            profile: None,
         }
     }
 
@@ -283,11 +291,7 @@ impl Orchestrator {
             .devices
             .iter()
             .find(|d| d.kind == DeviceKind::Keyboard && d.route.is_some())?;
-        let bindings = button_bindings_for(
-            &self.config,
-            Some(&dev.config_key),
-            self.current_app.as_deref(),
-        );
+        let bindings = button_bindings_for(&self.config, Some(&dev.config_key), &self.scope());
         let wanted: BTreeMap<u16, _> = KEYBOARD_KEY_CIDS
             .iter()
             .filter(|(_, button)| {
@@ -316,7 +320,7 @@ impl Orchestrator {
         // an owner switch can't observe a half-updated state.
         write_value(
             &self.shared.hook_maps,
-            self.hook_maps_for(key, self.current_app.as_deref()),
+            self.hook_maps_for(key, &self.scope()),
             "hook_maps",
         );
         self.publish_device_runtime();
@@ -404,7 +408,7 @@ impl Orchestrator {
                     &self.config,
                     &dev.config_key,
                     route,
-                    self.current_app.as_deref(),
+                    &self.scope(),
                     rearm_generation,
                 ))
             })
@@ -754,7 +758,7 @@ impl Orchestrator {
         self.current_app = id;
         write_value(
             &self.shared.hook_maps,
-            self.hook_maps_for(self.current_key(), self.current_app.as_deref()),
+            self.hook_maps_for(self.current_key(), &self.scope()),
             "hook_maps",
         );
         // Capture plans are app-scoped (per-app binding overlays); republish

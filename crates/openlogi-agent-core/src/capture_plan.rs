@@ -12,7 +12,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use openlogi_core::binding::{Action, Binding, ButtonId, GestureDirection, default_binding};
-use openlogi_core::bindings::{button_bindings_for, hidpp_gesture_maps_for, oshook_gestures_for};
+use openlogi_core::bindings::{
+    ActiveScope, button_bindings_for, hidpp_gesture_maps_for, oshook_gestures_for,
+};
 use openlogi_core::config::{Config, ThumbwheelSensitivity};
 use openlogi_hid::DeviceRoute;
 use openlogi_hid::session::gesture::{DIVERTABLE_STANDARD_BUTTONS, GESTURE_SOURCE_BUTTONS};
@@ -50,20 +52,20 @@ pub struct DeviceCapturePlan {
 /// Shared plan list, rewritten by the orchestrator and read by the watcher.
 pub type SharedCapturePlans = Arc<RwLock<Vec<DeviceCapturePlan>>>;
 
-/// Build one device's plan from the config (per-app effective for `app`).
+/// Build one device's plan from the config (per-app effective for `scope`).
 #[must_use]
 pub fn plan_for_device(
     config: &Config,
     config_key: &str,
     route: DeviceRoute,
-    app: Option<&str>,
+    scope: &ActiveScope,
     rearm_generation: u64,
 ) -> DeviceCapturePlan {
-    let bindings = button_bindings_for(config, Some(config_key), app);
+    let bindings = button_bindings_for(config, Some(config_key), scope);
     // A gesture-mode OS-hook button must stay native: the hook needs to see
     // its press to run hold+swipe detection, and diverting it would starve the
     // hook of events.
-    let oshook = oshook_gestures_for(config, Some(config_key), app);
+    let oshook = oshook_gestures_for(config, Some(config_key), scope);
     // One direction map per HID++ source in gesture mode — several may
     // gesture at once, each armed with its own raw-XY divert (the watcher
     // derives the CIDs to divert from this map's keys).
@@ -142,7 +144,7 @@ mod tests {
         cfg.set_gesture_mode("2b042", ButtonId::GestureButton, true);
         cfg.set_gesture_mode("2b042", ButtonId::HapticPanel, true);
 
-        let plan = plan_for_device(&cfg, "2b042", route(), None, 0);
+        let plan = plan_for_device(&cfg, "2b042", route(), &ActiveScope::default(), 0);
         assert!(
             plan.gesture_bindings.contains_key(&ButtonId::GestureButton)
                 && plan.gesture_bindings.contains_key(&ButtonId::HapticPanel),
@@ -171,7 +173,7 @@ mod tests {
             Binding::Single(Action::PrevTab),
         );
 
-        let plan = plan_for_device(&cfg, "2b01a", route(), None, 0);
+        let plan = plan_for_device(&cfg, "2b01a", route(), &ActiveScope::default(), 0);
         assert!(
             plan.divert_buttons
                 .contains(&(0x005b, ButtonId::WheelTiltLeft)),
@@ -199,7 +201,7 @@ mod tests {
             )),
         );
 
-        let plan = plan_for_device(&cfg, "2b01a", route(), None, 0);
+        let plan = plan_for_device(&cfg, "2b01a", route(), &ActiveScope::default(), 0);
         assert!(
             plan.divert_buttons
                 .iter()
@@ -216,7 +218,7 @@ mod tests {
         let mut cfg = Config::default();
         cfg.set_gesture_mode("2b042", ButtonId::HapticPanel, true);
 
-        let plan = plan_for_device(&cfg, "2b042", route(), None, 0);
+        let plan = plan_for_device(&cfg, "2b042", route(), &ActiveScope::default(), 0);
         assert!(
             plan.gesture_bindings.contains_key(&ButtonId::HapticPanel),
             "a gesture-mode panel must arm the HID++ gesture divert"
@@ -242,7 +244,7 @@ mod tests {
             Binding::Single(Action::Copy),
         );
 
-        let plan = plan_for_device(&cfg, "2b042", route(), None, 0);
+        let plan = plan_for_device(&cfg, "2b042", route(), &ActiveScope::default(), 0);
         assert!(
             plan.divert_buttons
                 .contains(&(HAPTIC_PANEL_CID, ButtonId::HapticPanel)),
@@ -254,7 +256,13 @@ mod tests {
     fn haptic_panel_default_is_diverted_for_actions_ring() {
         // Default binding is ShowActionsRing — the panel has no native OS path
         // and must be HID++-diverted so the ring can open.
-        let plan = plan_for_device(&Config::default(), "2b042", route(), None, 0);
+        let plan = plan_for_device(
+            &Config::default(),
+            "2b042",
+            route(),
+            &ActiveScope::default(),
+            0,
+        );
 
         assert!(
             plan.divert_buttons
@@ -273,7 +281,7 @@ mod tests {
             Binding::Single(Action::None),
         );
 
-        let plan = plan_for_device(&cfg, "2b042", route(), None, 0);
+        let plan = plan_for_device(&cfg, "2b042", route(), &ActiveScope::default(), 0);
         assert!(
             !plan
                 .divert_buttons
@@ -295,7 +303,7 @@ mod tests {
             Binding::Single(Action::CycleDpiPresets),
         );
 
-        let plan = plan_for_device(&cfg, "2b042", route(), None, 0);
+        let plan = plan_for_device(&cfg, "2b042", route(), &ActiveScope::default(), 0);
         assert!(
             plan.gesture_bindings.is_empty(),
             "gestures are off — no raw-XY gesture divert"
@@ -316,7 +324,7 @@ mod tests {
         let mut cfg = Config::default();
         cfg.set_gesture_mode("2b042", ButtonId::GestureButton, true);
 
-        let plan = plan_for_device(&cfg, "2b042", route(), None, 0);
+        let plan = plan_for_device(&cfg, "2b042", route(), &ActiveScope::default(), 0);
         assert!(
             !plan.gesture_bindings.is_empty(),
             "the gesture button owns the gesture role"
@@ -337,7 +345,7 @@ mod tests {
         let mut cfg = Config::default();
         cfg.set_gesture_mode("2b042", ButtonId::GestureButton, false);
 
-        let plan = plan_for_device(&cfg, "2b042", route(), None, 0);
+        let plan = plan_for_device(&cfg, "2b042", route(), &ActiveScope::default(), 0);
         assert!(
             !plan
                 .divert_buttons

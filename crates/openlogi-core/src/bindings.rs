@@ -10,9 +10,40 @@ use crate::binding::{
     Action, Binding, ButtonId, GestureDirection, default_binding, default_binding_for,
 };
 use crate::config::Config;
+use crate::profile::ProfileId;
+
+/// What bindings are resolved against: the application in front and the
+/// per-game profile the agent has applied for it. Both are `None` when the
+/// focus source knows nothing, and the GUI resolves the device's own bindings
+/// with `ActiveScope::default()`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ActiveScope {
+    /// The foreground application's identifier, or `None` when unknown.
+    pub app: Option<String>,
+    /// The profile currently applied for `app`, if any.
+    pub profile: Option<ProfileId>,
+}
+
+impl ActiveScope {
+    /// The per-app overlay only, as the pre-profile resolvers took it.
+    #[must_use]
+    pub fn for_app(app: Option<&str>) -> Self {
+        Self {
+            app: app.map(str::to_owned),
+            profile: None,
+        }
+    }
+}
+
+/// The active profile's G-Shift layer, as the hook consumes it. Empty when no
+/// profile is applied: without a trigger there is no layer to switch to.
+#[must_use]
+pub fn g_shift_bindings_for(config: &Config, scope: &ActiveScope) -> BTreeMap<ButtonId, Binding> {
+    config.g_shift_layer(scope)
+}
 
 /// Effective per-button single-action map for the device `config_key`, with
-/// `app_bundle`'s per-app overlay applied. Unset buttons fall back to
+/// `scope`'s per-app overlay applied. Unset buttons fall back to
 /// [`default_binding`].
 ///
 /// This projection is for one-shot consumers such as thumb-wheel rotation and
@@ -24,9 +55,9 @@ use crate::config::Config;
 pub fn bindings_for(
     config: &Config,
     config_key: Option<&str>,
-    app_bundle: Option<&str>,
+    scope: &ActiveScope,
 ) -> BTreeMap<ButtonId, Action> {
-    button_bindings_for(config, config_key, app_bundle)
+    button_bindings_for(config, config_key, scope)
         .into_iter()
         .map(|(button, binding)| (button, binding.click_action()))
         .collect()
@@ -41,10 +72,10 @@ pub fn bindings_for(
 pub fn button_bindings_for(
     config: &Config,
     config_key: Option<&str>,
-    app_bundle: Option<&str>,
+    scope: &ActiveScope,
 ) -> BTreeMap<ButtonId, Binding> {
     let stored = config_key
-        .map(|key| config.effective_bindings(key, app_bundle))
+        .map(|key| config.effective_bindings_in(key, scope))
         .unwrap_or_default();
     let mut bindings: BTreeMap<ButtonId, Binding> = ButtonId::ALL
         .iter()
@@ -97,7 +128,7 @@ pub fn hidpp_gesture_maps_for(
 }
 
 /// Per-direction maps for every OS-hook *gesture* button (Middle/Back/Forward,
-/// per [`ButtonId::is_os_hook_gesture_button`]) in gesture mode on `config_key`, with `app_bundle`'s per-app overlay applied,
+/// per [`ButtonId::is_os_hook_gesture_button`]) in gesture mode on `config_key`, with `scope`'s per-app overlay applied,
 /// for the OS hook to resolve a hold+swipe. Gesture mode is per-button (see
 /// [`Config::is_gesture_mode`]), so any number of entries may be live at once —
 /// concurrency between them is the hook's first-hold-wins policy, not a config
@@ -121,7 +152,7 @@ pub fn hidpp_gesture_maps_for(
 pub fn oshook_gestures_for(
     config: &Config,
     config_key: Option<&str>,
-    app_bundle: Option<&str>,
+    scope: &ActiveScope,
 ) -> BTreeMap<ButtonId, BTreeMap<GestureDirection, Action>> {
     let Some(key) = config_key else {
         return BTreeMap::new();
@@ -129,7 +160,7 @@ pub fn oshook_gestures_for(
     // Read the per-app *effective* map: a per-app override replaces a gesture
     // button with a `Single`, dropping it from the gesture set for that app.
     config
-        .effective_bindings(key, app_bundle)
+        .effective_bindings_in(key, scope)
         .into_iter()
         .filter(|(id, _)| id.is_os_hook_gesture_button())
         .filter_map(|(id, binding)| match binding {
@@ -155,7 +186,7 @@ mod tests {
         map.insert(GestureDirection::Up, Action::Copy);
         cfg.set_binding("2b042", ButtonId::GestureButton, Binding::Gesture(map));
 
-        let projected = bindings_for(&cfg, Some("2b042"), None);
+        let projected = bindings_for(&cfg, Some("2b042"), &ActiveScope::default());
         assert_eq!(
             projected.get(&ButtonId::GestureButton),
             Some(&default_binding(ButtonId::GestureButton)),
@@ -169,9 +200,9 @@ mod tests {
         let binding = Binding::LongPress(LongPressBinding::new(Action::Copy, Action::Paste));
         cfg.set_binding("2b042", ButtonId::Back, binding.clone());
 
-        let lifecycle = button_bindings_for(&cfg, Some("2b042"), None);
+        let lifecycle = button_bindings_for(&cfg, Some("2b042"), &ActiveScope::default());
         assert_eq!(lifecycle.get(&ButtonId::Back), Some(&binding));
-        let actions = bindings_for(&cfg, Some("2b042"), None);
+        let actions = bindings_for(&cfg, Some("2b042"), &ActiveScope::default());
         assert_eq!(actions.get(&ButtonId::Back), Some(&Action::Copy));
     }
 
@@ -188,7 +219,7 @@ mod tests {
             Action::VolumeUp.into(),
         );
 
-        let projected = bindings_for(&cfg, Some("2b034"), None);
+        let projected = bindings_for(&cfg, Some("2b034"), &ActiveScope::default());
         assert_eq!(projected.get(&ButtonId::Thumbwheel), Some(&Action::None));
     }
 
@@ -197,7 +228,7 @@ mod tests {
         let mut cfg = Config::default();
         cfg.set_binding("2b034", ButtonId::Thumbwheel, Action::AppExpose.into());
 
-        let projected = bindings_for(&cfg, Some("2b034"), None);
+        let projected = bindings_for(&cfg, Some("2b034"), &ActiveScope::default());
         assert_eq!(
             projected.get(&ButtonId::Thumbwheel),
             Some(&Action::AppExpose)
@@ -212,7 +243,7 @@ mod tests {
         map.insert(GestureDirection::Click, Action::Paste);
         cfg.set_binding("2b042", ButtonId::GestureButton, Binding::Gesture(map));
 
-        let projected = bindings_for(&cfg, Some("2b042"), None);
+        let projected = bindings_for(&cfg, Some("2b042"), &ActiveScope::default());
         assert_eq!(
             projected.get(&ButtonId::GestureButton),
             Some(&Action::Paste)
@@ -241,7 +272,7 @@ mod tests {
             )])),
         );
 
-        let oshook = oshook_gestures_for(&cfg, Some("2b042"), None);
+        let oshook = oshook_gestures_for(&cfg, Some("2b042"), &ActiveScope::default());
         assert_eq!(oshook.len(), 1, "only the gesture-mode Back belongs here");
         assert_eq!(
             oshook.get(&ButtonId::Back),
@@ -259,7 +290,7 @@ mod tests {
         cfg.set_gesture_mode("2b042", ButtonId::Back, true);
         cfg.set_gesture_mode("2b042", ButtonId::MiddleClick, true);
 
-        let oshook = oshook_gestures_for(&cfg, Some("2b042"), None);
+        let oshook = oshook_gestures_for(&cfg, Some("2b042"), &ActiveScope::default());
         assert!(oshook.contains_key(&ButtonId::Back), "got: {oshook:?}");
         assert!(
             oshook.contains_key(&ButtonId::MiddleClick),
@@ -298,7 +329,8 @@ mod tests {
         let mut cfg = Config::default();
         cfg.set_gesture_mode("2b042", ButtonId::Back, true);
         assert!(
-            oshook_gestures_for(&cfg, Some("2b042"), None).contains_key(&ButtonId::Back),
+            oshook_gestures_for(&cfg, Some("2b042"), &ActiveScope::default())
+                .contains_key(&ButtonId::Back),
             "Back gestures globally"
         );
 
@@ -312,13 +344,22 @@ mod tests {
             Some(Action::NextTab),
         );
         assert!(
-            oshook_gestures_for(&cfg, Some("2b042"), Some("com.apple.Safari")).is_empty(),
+            oshook_gestures_for(
+                &cfg,
+                Some("2b042"),
+                &ActiveScope::for_app(Some("com.apple.Safari"))
+            )
+            .is_empty(),
             "a per-app override of the owner removes it from the gesture set"
         );
         // Other apps are unaffected — Back still gestures.
         assert!(
-            oshook_gestures_for(&cfg, Some("2b042"), Some("com.other.App"))
-                .contains_key(&ButtonId::Back)
+            oshook_gestures_for(
+                &cfg,
+                Some("2b042"),
+                &ActiveScope::for_app(Some("com.other.App"))
+            )
+            .contains_key(&ButtonId::Back)
         );
     }
 
