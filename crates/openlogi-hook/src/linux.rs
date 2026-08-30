@@ -140,6 +140,16 @@ impl HookBackend for Backend {
         FRONTMOST_SOURCE.focused_window().map(with_steam_app_id)
     }
 
+    /// Subscribe to the selected frontmost backend's push source, when it has
+    /// one (only the gnome-shell backend does). Wraps `on_reading` so every
+    /// pushed reading also gets the Steam AppID lookup [`Self::focused_window`]
+    /// applies to polled readings.
+    fn watch_focus(on_reading: Box<dyn Fn(Option<FocusedWindow>) + Send + Sync>) -> bool {
+        FRONTMOST_SOURCE.watch(Box::new(move |window| {
+            on_reading(window.map(with_steam_app_id));
+        }))
+    }
+
     /// Read the global cursor position through X11 when an X server is available.
     /// Native Wayland intentionally has no equivalent global-coordinate API.
     fn cursor_position() -> Option<CursorPosition> {
@@ -594,6 +604,16 @@ trait FrontmostSource: Send + Sync {
     fn focused_window(&self) -> Option<FocusedWindow> {
         self.frontmost_app_id()
             .map(|id| FocusedWindow::app(ForegroundApp::unnamed(id)))
+    }
+
+    /// Subscribe to a push source of focus changes, when this backend has
+    /// one. `on_reading` is called on a backend-owned thread for as long as
+    /// the process lives. Returns `true` when a subscription was made; the
+    /// default is `false`, since most backends (X11, the null fallback) have
+    /// only the poll [`Self::focused_window`] answers.
+    fn watch(&self, on_reading: Box<dyn Fn(Option<FocusedWindow>) + Send + Sync>) -> bool {
+        let _ = on_reading;
+        false
     }
 
     /// Short backend identifier, for diagnostics / logging only.

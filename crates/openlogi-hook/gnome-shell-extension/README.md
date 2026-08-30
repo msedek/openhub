@@ -16,9 +16,15 @@ window contents, no input, no UI.
 - method: `GetFocusedWmClass() -> s` (empty string when nothing is focused)
 - method: `GetFocusedWindow() -> (s s u)` = (wmClass, title, pid); the empty
   triple (`"", "", 0`) when nothing is focused. Since v2.
+- signal: `FocusChanged(s wmClass, s title, u pid)` — the same triple as
+  `GetFocusedWindow`, emitted on every focus change and on the focused
+  window's title change. Since v2.
 
-Since v2 the extension also reads window titles and client pids; both stay on
-this machine and feed per-game profile rules only.
+Since v2 the extension also reads window titles and client pids, and pushes
+them as a `FocusChanged` signal instead of only answering polls; all of it
+stays on this machine and feeds per-app and per-game profile rules only. v2 is
+push + pull: OpenLogi's hook still polls `GetFocusedWindow` as a
+reconciliation safety net, at a slower cadence, once the signal is subscribed.
 
 ## Install
 
@@ -52,10 +58,14 @@ gdbus call --session \
 # Or the v2 method, which also returns the title and pid:
 busctl --user call org.openlogi.Frontmost /org/openlogi/Frontmost \
   org.openlogi.Frontmost GetFocusedWindow
+
+# Watch the push signal while alt-tabbing between windows:
+busctl --user monitor org.openlogi.Frontmost
 ```
 
 If `gdbus call` prints the focused window's WM_CLASS, OpenLogi's GNOME backend
-will pick it up automatically the next time the hook starts.
+will pick it up automatically the next time the hook starts. Alt-tabbing
+should print one `FocusChanged` per switch in the `busctl monitor` output.
 
 ## Notes
 

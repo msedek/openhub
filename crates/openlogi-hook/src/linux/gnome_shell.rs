@@ -17,6 +17,7 @@
 //! is built per poll (no extra D-Bus traffic beyond the method call itself).
 
 use std::sync::Once;
+use std::thread;
 use std::time::Duration;
 
 use tracing::debug;
@@ -50,6 +51,11 @@ trait Frontmost {
     /// `0` when nothing is focused. Extension v2 only.
     #[zbus(name = "GetFocusedWindow")]
     fn get_focused_window(&self) -> zbus::Result<(String, String, u32)>;
+
+    /// Emitted on every focus change and on a title change of the focused
+    /// window. Same triple as `GetFocusedWindow`.
+    #[zbus(signal)]
+    fn focus_changed(&self, wm_class: String, title: String, pid: u32) -> zbus::Result<()>;
 }
 
 /// Map a `(wm_class, title, pid)` triple from the extension's
@@ -79,13 +85,7 @@ struct GnomeShellSource {
 
 impl GnomeShellSource {
     fn connect() -> Option<Self> {
-        let conn = Builder::session()
-            .map_err(|e| debug!("gnome-shell: no session bus: {e}"))
-            .ok()?
-            .method_timeout(METHOD_TIMEOUT)
-            .build()
-            .map_err(|e| debug!("gnome-shell: connection build failed: {e}"))
-            .ok()?;
+        let conn = session_connection()?;
         // Probe reachability: a successful call (even an empty result) means the
         // OpenLogi extension is installed and exporting the service. An error
         // means it is absent/disabled, so this backend must not be selected.
@@ -101,6 +101,20 @@ impl GnomeShellSource {
             logged_v1_fallback: Once::new(),
         })
     }
+}
+
+/// Build a bare session-bus connection with [`METHOD_TIMEOUT`] applied, doing
+/// no reachability probe. Shared by [`GnomeShellSource::connect`] (which
+/// layers a probe on top) and [`GnomeShellSource::watch`], which needs its
+/// own connection because the poll thread keeps using the first one.
+fn session_connection() -> Option<Connection> {
+    Builder::session()
+        .map_err(|e| debug!("gnome-shell: no session bus: {e}"))
+        .ok()?
+        .method_timeout(METHOD_TIMEOUT)
+        .build()
+        .map_err(|e| debug!("gnome-shell: connection build failed: {e}"))
+        .ok()
 }
 
 impl FrontmostSource for GnomeShellSource {
@@ -132,6 +146,43 @@ impl FrontmostSource for GnomeShellSource {
                     .map(|id| FocusedWindow::app(ForegroundApp::unnamed(id)))
             }
         }
+    }
+
+    fn watch(&self, on_reading: Box<dyn Fn(Option<FocusedWindow>) + Send + Sync>) -> bool {
+        // A second connection: the poll thread keeps using `self.conn`, and
+        // zbus connections are not meant to be shared across threads that
+        // each drive their own blocking read loop.
+        let Some(conn) = session_connection() else {
+            return false;
+        };
+        thread::Builder::new()
+            .name("openlogi-focus-push".into())
+            .spawn(move || {
+                let proxy = match FrontmostProxy::new(&conn) {
+                    Ok(proxy) => proxy,
+                    Err(e) => {
+                        debug!("gnome-shell: push proxy build failed: {e}");
+                        return;
+                    }
+                };
+                let stream = match proxy.receive_focus_changed() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        debug!("gnome-shell: signal subscription failed: {e}");
+                        return;
+                    }
+                };
+                for signal in stream {
+                    let Ok(args) = signal.args() else { continue };
+                    on_reading(describe(
+                        args.wm_class().clone(),
+                        args.title().clone(),
+                        *args.pid(),
+                    ));
+                }
+                debug!("gnome-shell: signal stream ended");
+            })
+            .is_ok()
     }
 
     fn name(&self) -> &'static str {
