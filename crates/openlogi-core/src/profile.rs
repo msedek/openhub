@@ -70,7 +70,7 @@ impl MatchRule {
 ///
 /// A button absent from a layer keeps whatever it would do without the
 /// profile; `g_shift` lists only the buttons that change while the trigger is
-/// held. [`Action::None`] disables a button; `Action::GShift` makes it the
+/// held. [`Action::None`] disables a button; [`Action::GShift`] makes it the
 /// trigger.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

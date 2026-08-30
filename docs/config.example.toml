@@ -126,6 +126,7 @@ matches = [{ WmClass = "lostark.exe" }, { SteamAppId = 1599340 }, { Title = "^LO
 [profiles.lost-ark.assignments.normal]
 MiddleClick = { RunMacro = "superspace" }
 Back = { RunMacro = "hyper" }
+DpiToggle = "GShift"
 
 [profiles.lost-ark.assignments.g_shift]
 RightClick = { RunMacro = "superright" }

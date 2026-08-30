@@ -336,6 +336,7 @@ fn persisted_action_variant_names_are_stable() {
         "Cut",
         "CycleDpiPresets",
         "Find",
+        "GShift",
         "HorizontalScrollLeft",
         "HorizontalScrollRight",
         "HoldShortcut",
@@ -392,6 +393,19 @@ fn run_macro_roundtrips_toml_by_id() {
     let action = Action::RunMacro(MacroId("hyper".into()));
     assert_eq!(roundtrip(&action), action);
     assert_eq!(action.label(), "Run macro \"hyper\"");
+}
+
+/// The trigger is a layer switch, not an action: it serialises as a plain
+/// string, it is agent-side, and it is pickable on the button screen.
+#[test]
+fn g_shift_is_a_unit_action_the_agent_owns() {
+    assert_eq!(roundtrip(&Action::GShift), Action::GShift);
+    assert_eq!(
+        toml::Value::try_from(Action::GShift).expect("serialize"),
+        toml::Value::String("GShift".into())
+    );
+    assert_eq!(Action::GShift.label(), "G-Shift");
+    assert!(Action::catalog().contains(&Action::GShift));
 }
 
 #[test]

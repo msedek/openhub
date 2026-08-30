@@ -270,7 +270,10 @@ impl Action {
             // A macro run outlives one injector call: it repeats until its
             // press ends and has to release what it pressed on every exit, so
             // the agent's run registry owns it, not a fire-and-forget backend.
-            | Action::RunMacro(_) => Effect::AgentSide,
+            | Action::RunMacro(_)
+            // The hook consumes GShift as a layer switch before any effect
+            // would be dispatched; this arm only keeps the match exhaustive.
+            | Action::GShift => Effect::AgentSide,
 
             Action::ScrollUp => Effect::Scroll { dx: 0, dy: 1 },
             Action::ScrollDown => Effect::Scroll { dx: 0, dy: -1 },

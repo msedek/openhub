@@ -143,6 +143,8 @@ impl ActionExecutor {
                 }
                 None
             }
+            // The hook consumes the trigger; here it is inert.
+            Action::GShift => return,
             other => {
                 openlogi_inject::execute(other);
                 None
