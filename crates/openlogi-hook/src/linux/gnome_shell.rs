@@ -59,9 +59,8 @@ trait Frontmost {
 }
 
 /// Map a `(wm_class, title, pid)` triple from the extension's
-/// `GetFocusedWindow` (or a synthesized one, for the `GetFocusedWmClass`
-/// fallback) into a [`FocusedWindow`]. An empty `wm_class` means nothing is
-/// focused.
+/// `GetFocusedWindow` into a [`FocusedWindow`]. An empty `wm_class` means
+/// nothing is focused.
 fn describe(wm_class: String, title: String, pid: u32) -> Option<FocusedWindow> {
     if wm_class.is_empty() {
         return None;
@@ -207,4 +206,30 @@ impl FrontmostSource for GnomeShellSource {
 /// Candidate constructor registered in [`super::wayland_candidates`].
 pub(super) fn candidate() -> Option<Box<dyn FrontmostSource>> {
     GnomeShellSource::connect().map(|s| Box::new(s) as Box<dyn FrontmostSource>)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::describe;
+
+    #[test]
+    fn empty_wm_class_means_nothing_focused() {
+        assert!(describe(String::new(), "ignored".into(), 42).is_none());
+    }
+
+    #[test]
+    fn wm_class_with_empty_title_and_zero_pid_omits_both() {
+        let window = describe("steam".into(), String::new(), 0).expect("wm_class present");
+        assert_eq!(window.app.id, "steam");
+        assert_eq!(window.title, None);
+        assert_eq!(window.pid, None);
+    }
+
+    #[test]
+    fn wm_class_with_title_and_pid_reports_all_three() {
+        let window = describe("steam".into(), "Steam".into(), 1234).expect("wm_class present");
+        assert_eq!(window.app.id, "steam");
+        assert_eq!(window.title, Some("Steam".to_string()));
+        assert_eq!(window.pid, Some(1234));
+    }
 }
